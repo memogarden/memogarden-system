@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "memogarden-system"
+version = "0.1.0"
+description = "MemoGarden System - Soil and Core business logic layers"
+authors = ["MemoGarden Contributors"]
+readme = "README.md"
+packages = [{include = "system"}]
+
+[tool.poetry.dependencies]
+python = "^3.13"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+pytest-cov = "^7.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

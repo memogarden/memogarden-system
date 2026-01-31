@@ -1,0 +1,107 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.memogarden.net/items/email.schema.json",
+  "title": "Email",
+  "description": "Email message imported from external provider (GMail, Outlook, etc.). Extends Note with RFC 5322 fields.",
+  "allOf": [
+    {
+      "$ref": "note.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "rfc_message_id": {
+          "type": "string",
+          "description": "RFC 822 Message-ID header (globally unique, used for deduplication)",
+          "pattern": "^<[^@]+@[^@]+\\.[^@]+>$",
+          "examples": ["<CAD5xWgHZ5K9M3d8x@example.com>"]
+        },
+        "from_address": {
+          "type": "string",
+          "description": "From header (parsed email address)",
+          "format": "email",
+          "examples": ["sender@example.com"]
+        },
+        "to_addresses": {
+          "type": "array",
+          "description": "To header (parsed list of recipient addresses)",
+          "items": {
+            "type": "string",
+            "format": "email"
+          },
+          "minItems": 1
+        },
+        "cc_addresses": {
+          "type": ["array", "null"],
+          "description": "Cc header (parsed list of CC recipients)",
+          "items": {
+            "type": "string",
+            "format": "email"
+          }
+        },
+        "bcc_addresses": {
+          "type": ["array", "null"],
+          "description": "Bcc header (rarely available in exports due to privacy)",
+          "items": {
+            "type": "string",
+            "format": "email"
+          }
+        },
+        "sent_at": {
+          "type": "string",
+          "description": "Date header (when email was sent)",
+          "format": "date-time",
+          "examples": ["2026-01-30T12:34:56Z"]
+        },
+        "received_at": {
+          "type": ["string", "null"],
+          "description": "Delivery timestamp (when available)",
+          "format": "date-time"
+        },
+        "references": {
+          "type": ["array", "null"],
+          "description": "References header (thread ancestor Message-IDs in order)",
+          "items": {
+            "type": "string",
+            "pattern": "^<[^@]+@[^@]+\\.[^@]+>$"
+          }
+        },
+        "in_reply_to": {
+          "type": ["string", "null"],
+          "description": "In-Reply-To header (direct parent Message-ID)",
+          "pattern": "^<[^@]+@[^@]+\\.[^@]+>$"
+        },
+        "content_type": {
+          "type": "string",
+          "description": "MIME type of description field",
+          "enum": ["text/plain", "text/html"],
+          "default": "text/plain"
+        },
+        "has_attachments": {
+          "type": "boolean",
+          "description": "Whether email has any attachments"
+        },
+        "attachment_count": {
+          "type": "integer",
+          "description": "Number of attachments",
+          "minimum": 0
+        },
+        "attachment_filenames": {
+          "type": "array",
+          "description": "List of attachment filenames (for significance inference)",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "rfc_message_id",
+        "from_address",
+        "to_addresses",
+        "sent_at",
+        "has_attachments",
+        "attachment_count"
+      ]
+    }
+  ]
+}

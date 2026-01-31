@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.memogarden.net/items/message.schema.json",
+  "title": "Message",
+  "description": "Chat message or communication event. Extends Note with participant and channel information.",
+  "allOf": [
+    {
+      "$ref": "note.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "sender": {
+          "type": "string",
+          "description": "Name or identifier of the message sender",
+          "examples": ["Alice", "user@example.com", "+1234567890"]
+        },
+        "channel": {
+          "type": "string",
+          "description": "Channel or conversation identifier",
+          "examples": ["#general", "direct-message", "support-ticket-123"]
+        },
+        "message_type": {
+          "type": "string",
+          "description": "Type of message",
+          "enum": ["text", "image", "file", "system", "emoji"]
+        },
+        "in_reply_to_message": {
+          "type": ["string", "null"],
+          "description": "UUID of message being replied to (for threaded conversations)"
+        }
+      },
+      "required": ["sender", "channel", "message_type"]
+    }
+  ]
+}
