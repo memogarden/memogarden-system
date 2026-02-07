@@ -10,14 +10,19 @@ All recurrence IDs are auto-generated via entity.create(). This design:
 2. Ensures entity registry entry is always created with recurrence
 3. Encapsulates ID generation logic within the database layer
 4. Simplifies the API - users call core.recurrence.create() without managing IDs
+
+SCHEMA (v20260130):
+- Uses generic entity table with type='Recurrence'
+- Recurrence data stored in data JSON field
 """
 
+import json
 import sqlite3
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from ..exceptions import ResourceNotFound
-from ..utils import isodatetime
+from ..utils import isodatetime, uid
 from . import query
 
 if TYPE_CHECKING:
@@ -29,6 +34,9 @@ class RecurrenceOperations:
 
     Coordinates with EntityOperations through Core reference.
     Automatically creates entity registry entries via core.entity.create().
+
+    Uses the new schema (v20260130) where recurrence data is stored
+    in the entity.data JSON field.
     """
 
     def __init__(self, conn: sqlite3.Connection, core: "Core | None" = None):
@@ -46,16 +54,36 @@ class RecurrenceOperations:
         """Get recurrence by ID.
 
         Args:
-            recurrence_id: The UUID of the recurrence
+            recurrence_id: The UUID of the recurrence (plain or with core_ prefix)
 
         Returns:
-            sqlite3.Row with recurrence data from recurrences_view
+            sqlite3.Row with recurrence data from entity table
 
         Raises:
             ResourceNotFound: If recurrence_id doesn't exist
         """
+        # Strip prefix if provided
+        recurrence_id = uid.strip_prefix(recurrence_id)
+
         row = self._conn.execute(
-            "SELECT * FROM recurrences_view WHERE id = ?",
+            """SELECT
+                e.uuid,
+                e.type,
+                e.hash,
+                e.previous_hash,
+                e.version,
+                e.created_at,
+                e.updated_at,
+                e.superseded_by,
+                e.superseded_at,
+                e.group_id,
+                e.derived_from,
+                json_extract(e.data, '$.rrule') as rrule,
+                json_extract(e.data, '$.entities') as entities,
+                json_extract(e.data, '$.valid_from') as valid_from,
+                json_extract(e.data, '$.valid_until') as valid_until
+               FROM entity e
+               WHERE e.type = 'Recurrence' AND e.uuid = ?""",
             (recurrence_id,)
         ).fetchone()
 
@@ -76,8 +104,9 @@ class RecurrenceOperations:
     ) -> str:
         """Create a recurrence with automatic entity registry creation.
 
-        Creates both the entity registry entry and recurrence record.
-        The recurrence ID is auto-generated via core.entity.create().
+        Creates an entity entry with type='Recurrence' and stores recurrence
+        data in the data JSON field. The recurrence ID is auto-generated via
+        core.entity.create().
 
         Args:
             rrule: iCal RRULE string (e.g., "FREQ=MONTHLY;BYDAY=2FR")
@@ -86,7 +115,7 @@ class RecurrenceOperations:
             valid_until: Optional end of recurrence window (datetime, null = forever)
 
         Returns:
-            The auto-generated recurrence ID (UUID v4 string)
+            The auto-generated recurrence ID (UUID v4 string, no prefix)
 
         Raises:
             ValueError: If RecurrenceOperations initialized without Core reference
@@ -98,17 +127,27 @@ class RecurrenceOperations:
                 "Use core.recurrence.create() instead of standalone RecurrenceOperations."
             )
 
-        # Create entity registry entry (auto-generates UUID)
-        recurrence_id = self._core.entity.create("recurrences")
+        # Build recurrence data as JSON
+        recurrence_data = {
+            "rrule": rrule,
+            "entities": entities,
+            "valid_from": isodatetime.to_timestamp(valid_from),
+            "valid_until": isodatetime.to_timestamp(valid_until) if valid_until else None
+        }
 
-        valid_from_str = isodatetime.to_timestamp(valid_from)
-        valid_until_str = isodatetime.to_timestamp(valid_until) if valid_until else None
+        # Create entity registry entry with recurrence data
+        recurrence_id = self._core.entity.create(
+            entity_type="Recurrence",
+            group_id=None,
+            derived_from=None
+        )
 
+        # Update entity with recurrence data
         self._conn.execute(
-            """INSERT INTO recurrences
-               (id, rrule, entities, valid_from, valid_until)
-               VALUES (?, ?, ?, ?, ?)""",
-            (recurrence_id, rrule, entities, valid_from_str, valid_until_str)
+            """UPDATE entity
+               SET data = ?
+               WHERE uuid = ?""",
+            (json.dumps(recurrence_data), recurrence_id)
         )
 
         return recurrence_id
@@ -135,8 +174,8 @@ class RecurrenceOperations:
         filters = filters or {}
 
         param_map = {
-            "valid_from": "r.valid_from >= ?",
-            "valid_until": "r.valid_until <= ?",
+            "valid_from": "json_extract(e.data, '$.valid_from') >= ?",
+            "valid_until": "json_extract(e.data, '$.valid_until') <= ?",
         }
 
         # Filter out None values and exclude non-column flags like include_superseded
@@ -147,20 +186,35 @@ class RecurrenceOperations:
 
         where_clause, params = query.build_where_clause(conditions, param_map)
 
+        # Always filter by type='Recurrence'
+        if where_clause == "1=1":
+            where_clause = "e.type = 'Recurrence'"
+        else:
+            where_clause = "e.type = 'Recurrence' AND " + where_clause
+
         # Handle superseded filter as special case (exclude if not explicitly included)
         if not filters.get("include_superseded"):
-            if where_clause == "1=1":
-                where_clause = "e.superseded_by IS NULL"
-            else:
-                where_clause += " AND e.superseded_by IS NULL"
+            where_clause += " AND e.superseded_by IS NULL"
         params.extend([limit, offset])
 
         query_sql = f"""
-            SELECT r.*,
-                   e.created_at, e.updated_at, e.superseded_by, e.superseded_at,
-                   e.group_id, e.derived_from
-            FROM recurrences r
-            JOIN entity e ON r.id = e.id
+            SELECT
+                e.uuid,
+                e.type,
+                e.hash,
+                e.previous_hash,
+                e.version,
+                e.created_at,
+                e.updated_at,
+                e.superseded_by,
+                e.superseded_at,
+                e.group_id,
+                e.derived_from,
+                json_extract(e.data, '$.rrule') as rrule,
+                json_extract(e.data, '$.entities') as entities,
+                json_extract(e.data, '$.valid_from') as valid_from,
+                json_extract(e.data, '$.valid_until') as valid_until
+            FROM entity e
             WHERE {where_clause}
             ORDER BY e.created_at DESC
             LIMIT ? OFFSET ?
@@ -173,37 +227,50 @@ class RecurrenceOperations:
 
         Args:
             recurrence_id: The UUID of the recurrence to update
-            data: Dictionary of field names to values to update
 
         Note:
             - Only non-None fields in data are updated
-            - 'id' field is always excluded from updates
             - entity.updated_at is also updated
         """
-        # Convert datetime fields to ISO strings if present
+        # Strip prefix if provided
+        recurrence_id = uid.strip_prefix(recurrence_id)
+
+        # Convert datetime fields to timestamps if present
         if "valid_from" in data and data["valid_from"] is not None:
             data["valid_from"] = isodatetime.to_timestamp(data["valid_from"])
         if "valid_until" in data and data["valid_until"] is not None:
             data["valid_until"] = isodatetime.to_timestamp(data["valid_until"])
 
-        # Build UPDATE clause
-        update_clause, params = query.build_update_clause(
-            data,
-            exclude={"id"}
-        )
+        if data:
+            # Build JSON updates using json_set for each field
+            json_updates = []
+            params = []
 
-        if update_clause:
+            for key, value in data.items():
+                json_updates.append("json_set(entity.data, ?, ?)")
+                params.extend([f"$.{key}", value])
+
             params.append(recurrence_id)
 
-            # Update recurrence
-            self._conn.execute(
-                f"UPDATE recurrences SET {update_clause} WHERE id = ?",
-                params
-            )
+            # Build nested json_set calls to update multiple fields
+            update_sql = "UPDATE entity SET data = "
+            for i, update in enumerate(json_updates):
+                if i == 0:
+                    update_sql += update
+                else:
+                    update_sql = f"json_set({update_sql}, {update})"
 
-            # Update entity registry timestamp
-            now = isodatetime.now()
-            self._conn.execute(
-                "UPDATE entity SET updated_at = ? WHERE id = ?",
-                (now, recurrence_id)
-            )
+            update_sql += " WHERE uuid = ?"
+
+            self._conn.execute(update_sql, params)
+
+            # Update entity hash chain
+            if self._core is not None:
+                self._core.entity.update_hash(recurrence_id)
+            else:
+                # Fallback for standalone usage
+                now = isodatetime.now()
+                self._conn.execute(
+                    "UPDATE entity SET updated_at = ? WHERE uuid = ?",
+                    (now, recurrence_id)
+                )

@@ -45,14 +45,16 @@ class EntityOperations:
         self,
         entity_type: str,
         group_id: str | None = None,
-        derived_from: str | None = None
+        derived_from: str | None = None,
+        data: str | None = None
     ) -> str:
         """Create entity in global registry with auto-generated UUID and hash.
 
         Args:
-            entity_type: The type of entity (e.g., 'transactions', 'recurrences')
+            entity_type: The type of entity (e.g., 'Transaction', 'Recurrence')
             group_id: Optional group ID for clustering related entities
             derived_from: Optional ID of source entity for provenance tracking
+            data: Optional JSON data for type-specific fields (defaults to empty JSON object)
 
         Returns:
             The auto-generated entity UUID (plain UUID, no prefix)
@@ -60,11 +62,17 @@ class EntityOperations:
         Raises:
             sqlite3.IntegrityError: If generated UUID already exists (extremely rare)
         """
+        import json
+
         # Generate UUID with collision retry
         max_retries = 3
         for attempt in range(max_retries):
             entity_uuid = uid.generate_uuid()
             now = isodatetime.now()
+
+            # Use empty JSON object if data not provided
+            if data is None:
+                data = json.dumps({})
 
             # Compute initial hash (previous_hash is NULL for initial entities)
             initial_hash = hash_chain.compute_entity_hash(
@@ -78,9 +86,9 @@ class EntityOperations:
 
             try:
                 self._conn.execute(
-                    """INSERT INTO entity (uuid, type, hash, previous_hash, version, group_id, derived_from, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (entity_uuid, entity_type, initial_hash, None, 1, group_id, derived_from, now, now)
+                    """INSERT INTO entity (uuid, type, hash, previous_hash, version, group_id, derived_from, created_at, updated_at, data)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (entity_uuid, entity_type, initial_hash, None, 1, group_id, derived_from, now, now, data)
                 )
                 return entity_uuid
             except sqlite3.IntegrityError:
@@ -224,6 +232,34 @@ class EntityOperations:
         )
 
         return new_hash
+
+    def update_data(self, entity_id: str, data: dict) -> None:
+        """Update entity.data JSON field and refresh hash.
+
+        This is a convenience method for Semantic API edit operations that
+        modify the entity.data JSON field. The hash is automatically updated
+        to reflect the data change.
+
+        Args:
+            entity_id: The UUID of the entity to update
+            data: New data dictionary (will be JSON-serialized)
+
+        Raises:
+            ResourceNotFound: If entity_id doesn't exist
+        """
+        import json
+
+        entity_id = uid.strip_prefix(entity_id)
+        new_data = json.dumps(data)
+
+        # Update entity.data and timestamp
+        self._conn.execute(
+            "UPDATE entity SET data = ?, updated_at = ? WHERE uuid = ?",
+            (new_data, isodatetime.now(), entity_id)
+        )
+
+        # Refresh hash to maintain hash chain integrity
+        self.update_hash(entity_id)
 
     def update_timestamp(self, entity_id: str) -> None:
         """Update the updated_at timestamp (deprecated: use update_hash).
