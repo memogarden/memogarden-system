@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.memogarden.net/items/action.schema.json",
+  "title": "Action",
+  "description": "Record of a Semantic API operation being invoked (audit fact)",
+  "allOf": [
+    {
+      "$ref": "item.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "_type": {
+          "const": "Action"
+        },
+        "actor": {
+          "type": "string",
+          "description": "Who performed the action (user UUID or agent identifier)",
+          "examples": ["core_12345678-1234-1234-1234-123456789abc", "agent:claude-code"]
+        },
+        "operation": {
+          "type": "string",
+          "description": "Semantic API verb being executed",
+          "examples": ["create", "get", "edit", "forget", "query", "add", "amend", "link", "enter", "leave", "focus"]
+        },
+        "params": {
+          "type": "object",
+          "description": "Operation parameters (verb-specific)",
+          "additionalProperties": true
+        },
+        "context": {
+          "type": ["string", "null"],
+          "description": "Human-readable context or intent for the action",
+          "examples": ["Creating transaction for coffee purchase", "Querying transactions for January 2026"]
+        },
+        "request_id": {
+          "type": ["string", "null"],
+          "description": "Unique identifier for this request (for correlation)",
+          "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$",
+          "examples": ["12345678-1234-1234-1234-123456789abc"]
+        },
+        "parent_action": {
+          "type": ["string", "null"],
+          "pattern": "^soil_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "description": "UUID of parent Action if this is a nested action"
+        }
+      },
+      "required": ["actor", "operation", "params"]
+    }
+  ]
+}

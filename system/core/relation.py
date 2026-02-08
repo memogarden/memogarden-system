@@ -13,6 +13,11 @@ TIME HORIZON MECHANISM (RFC-002):
 SCHEMA (v20260130):
 - Uses user_relation table in Core DB
 - time_horizon and last_access_at stored as days since epoch (2020-01-01)
+
+CONNECTION LIFECYCLE (Session 6.5 Refactor):
+- Operations receive Core instance, not direct Connection
+- All operations use self._conn property which calls core._get_conn()
+- This enforces context manager usage at runtime
 """
 
 import json
@@ -63,15 +68,25 @@ class RelationOperations:
     longevity through the safety coefficient mechanism.
     """
 
-    def __init__(self, conn: sqlite3.Connection, core: "Core | None" = None):
+    def __init__(self, core: "Core"):
         """Initialize relation operations.
 
         Args:
-            conn: SQLite connection with row_factory set to sqlite3.Row
-            core: Core reference for future coordination (unused currently)
+            core: Core reference for coordinating entity registry operations.
         """
-        self._conn = conn
         self._core = core
+
+    @property
+    def _conn(self) -> sqlite3.Connection:
+        """Get database connection, enforcing context manager usage.
+
+        Returns:
+            SQLite connection
+
+        Raises:
+            RuntimeError: If Core is not being used as context manager
+        """
+        return self._core._get_conn()
 
     def create(
         self,

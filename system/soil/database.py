@@ -12,19 +12,43 @@ from .relation import SystemRelation
 
 
 class Soil:
-    """Soil database for immutable Items and System Relations."""
+    """Soil database for immutable Items and System Relations.
+
+    CONNECTION LIFECYCLE (Session 6.5 Refactor):
+    - Soil MUST be used as context manager (enforced at runtime)
+    - __enter__: Marks Soil as active, creates connection, returns self
+    - __exit__: Commits on success, rollbacks on exception, always closes
+    - Operations call _get_connection() which raises RuntimeError if not in context
+    """
 
     def __init__(self, db_path: str | Path = "soil.db"):
         """Initialize Soil database.
 
         Args:
             db_path: Path to SQLite database file
+
+        Note:
+            Soil must be used as context manager. Operations will raise
+            RuntimeError if called outside of 'with' statement.
         """
         self.db_path = Path(db_path)
         self._conn: sqlite3.Connection | None = None
+        self._in_context = False  # Track if we're inside a context manager
 
     def _get_connection(self) -> sqlite3.Connection:
-        """Get or create database connection."""
+        """Get connection, enforcing context manager usage.
+
+        Returns:
+            SQLite connection
+
+        Raises:
+            RuntimeError: If Soil is not being used as context manager
+        """
+        if not self._in_context:
+            raise RuntimeError(
+                "Soil must be used as context manager. "
+                "Use: with get_soil() as soil: ..."
+            )
         if self._conn is None:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             self._conn = sqlite3.connect(str(self.db_path))
@@ -40,15 +64,35 @@ class Soil:
             self._conn = None
 
     def __enter__(self) -> Soil:
-        self._get_connection()
+        """Enter context manager for transaction.
+
+        Returns:
+            self for use in with-statement
+        """
+        self._in_context = True
+        self._get_connection()  # Ensure connection is created
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type is None:
-            self._conn.commit()
-        else:
-            self._conn.rollback()
-        self.close()
+        """Exit context manager, committing or rolling back transaction.
+
+        Args:
+            exc_type: Exception type if exception occurred, else None
+            exc_val: Exception value if exception occurred, else None
+            exc_tb: Exception traceback if exception occurred, else None
+        """
+        self._in_context = False
+        try:
+            if self._conn is not None:  # Only commit/rollback if connection exists
+                if exc_type is None:
+                    # No exception - commit the transaction
+                    self._conn.commit()
+                else:
+                    # Exception occurred - rollback the transaction
+                    self._conn.rollback()
+        finally:
+            # Always close connection
+            self.close()
 
     # ==========================================================================
     # INITIALIZATION

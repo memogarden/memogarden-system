@@ -35,6 +35,11 @@ KNOWN LIMITATIONS (M1: Deferred to Session 5 - Context Verbs and Capture):
 - This violates INV-14 (Cross-Session Persistence) - will be fixed in Session 5
 - When implementing view_timeline persistence, add view_timeline column to context_frame table
   and update get_context_frame() to query Views from entity table where _type='View'
+
+CONNECTION LIFECYCLE (Session 6.5 Refactor):
+- Operations receive Core instance, not direct Connection
+- All operations use self._conn property which calls core._get_conn()
+- This enforces context manager usage at runtime
 """
 
 import json
@@ -177,15 +182,25 @@ class ContextOperations:
     and view-streams (append-only action records) for users and scopes.
     """
 
-    def __init__(self, conn: sqlite3.Connection, core: "Core | None" = None):
+    def __init__(self, core: "Core"):
         """Initialize context operations.
 
         Args:
-            conn: SQLite connection with row_factory set to sqlite3.Row
             core: Core reference for coordinating with entity operations
         """
-        self._conn = conn
         self._core = core
+
+    @property
+    def _conn(self) -> sqlite3.Connection:
+        """Get database connection, enforcing context manager usage.
+
+        Returns:
+            SQLite connection
+
+        Raises:
+            RuntimeError: If Core is not being used as context manager
+        """
+        return self._core._get_conn()
 
     # =========================================================================
     # CONTEXT FRAME OPERATIONS

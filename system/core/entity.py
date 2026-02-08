@@ -18,12 +18,22 @@ HASH CHAIN (PRD v6):
 - Each entity has a hash representing its current state
 - hash = SHA256(metadata + previous_hash)
 - Enables optimistic locking and conflict detection
+
+CONNECTION LIFECYCLE (Session 6.5 Refactor):
+- Operations receive Core instance, not direct Connection
+- All operations use self._conn property which calls core._get_conn()
+- This enforces context manager usage at runtime
 """
 
-import sqlite3
+from typing import TYPE_CHECKING
 
 from ..exceptions import ResourceNotFound
 from ..utils import hash_chain, isodatetime, uid
+
+if TYPE_CHECKING:
+    from . import Core
+
+import sqlite3
 
 
 class EntityOperations:
@@ -33,13 +43,29 @@ class EntityOperations:
     in the global entity registry with PRD v6 compliant hash chains.
     """
 
-    def __init__(self, conn: sqlite3.Connection):
-        """Initialize entity operations with a database connection.
+    def __init__(self, core: "Core"):
+        """Initialize entity operations with a Core instance.
 
         Args:
-            conn: SQLite connection with row_factory set to sqlite3.Row
+            core: Core instance for database access
+
+        Note:
+            Uses self._conn property to get connection via core._get_conn(),
+            which enforces context manager usage.
         """
-        self._conn = conn
+        self._core = core
+
+    @property
+    def _conn(self) -> sqlite3.Connection:
+        """Get database connection, enforcing context manager usage.
+
+        Returns:
+            SQLite connection
+
+        Raises:
+            RuntimeError: If Core is not being used as context manager
+        """
+        return self._core._get_conn()
 
     def create(
         self,

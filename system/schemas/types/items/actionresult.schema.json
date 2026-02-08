@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.memogarden.net/items/actionresult.schema.json",
+  "title": "ActionResult",
+  "description": "Result of a Semantic API operation (audit fact)",
+  "allOf": [
+    {
+      "$ref": "item.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "_type": {
+          "const": "ActionResult"
+        },
+        "result": {
+          "type": ["object", "null"],
+          "description": "Operation result (if successful)",
+          "additionalProperties": true
+        },
+        "error": {
+          "type": ["string", "null"],
+          "description": "Error message (if operation failed)",
+          "examples": ["Entity not found", "Validation failed: amount must be positive"]
+        },
+        "result_summary": {
+          "type": ["string", "null"],
+          "description": "Human-readable summary of the operation result",
+          "examples": ["Created transaction core_abc123", "Retrieved 5 entities", "Updated entity fields"]
+        },
+        "duration_ms": {
+          "type": "integer",
+          "description": "Operation duration in milliseconds",
+          "minimum": 0,
+          "examples": [42, 150, 1000]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["success", "error", "timeout", "cancelled"],
+          "description": "Operation completion status"
+        }
+      },
+      "required": ["status", "duration_ms"]
+    }
+  ]
+}

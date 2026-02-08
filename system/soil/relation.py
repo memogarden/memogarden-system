@@ -7,7 +7,7 @@ from dataclasses import dataclass
 class SystemRelation:
     """System relation (immutable structural fact)."""
     uuid: str
-    kind: str  # 'triggers' | 'cites' | 'derives_from' | 'contains' | 'replies_to' | 'continues' | 'supersedes'
+    kind: str  # 'triggers' | 'cites' | 'derives_from' | 'contains' | 'replies_to' | 'continues' | 'supersedes' | 'result_of'
     source: str  # UUID of source
     source_type: str  # 'item' | 'entity'
     target: str  # UUID of target

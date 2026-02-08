@@ -18,6 +18,11 @@ HASH CHAIN (PRD v6):
 SCHEMA (v20260130):
 - Uses generic entity table with type='Transaction'
 - Transaction data stored in data JSON field
+
+CONNECTION LIFECYCLE (Session 6.5 Refactor):
+- Operations receive Core instance, not direct Connection
+- All operations use self._conn property which calls core._get_conn()
+- This enforces context manager usage at runtime
 """
 
 import json
@@ -44,16 +49,26 @@ class TransactionOperations:
     in the entity.data JSON field.
     """
 
-    def __init__(self, conn: sqlite3.Connection, core: "Core | None" = None):
+    def __init__(self, core: "Core"):
         """Initialize transaction operations.
 
         Args:
-            conn: SQLite connection with row_factory set to sqlite3.Row
             core: Core reference for coordinating entity registry operations.
                   Required for create() to auto-generate entity IDs.
         """
-        self._conn = conn
         self._core = core
+
+    @property
+    def _conn(self) -> sqlite3.Connection:
+        """Get database connection, enforcing context manager usage.
+
+        Returns:
+            SQLite connection
+
+        Raises:
+            RuntimeError: If Core is not being used as context manager
+        """
+        return self._core._get_conn()
 
     def get_by_id(self, transaction_id: str) -> sqlite3.Row:
         """Get transaction by ID.

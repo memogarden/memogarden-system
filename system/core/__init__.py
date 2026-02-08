@@ -5,7 +5,8 @@ Core encapsulates connection management and provides access to entity operations
 
 ARCHITECTURE:
 - Core owns its connection (no Flask g.db dependency)
-- Connection closes on context exit (atomic=True) or after operation (atomic=False)
+- Core MUST be used as context manager (enforced at runtime)
+- Connection closes on context exit (commit or rollback based on exception)
 - Each entity type gets an encapsulated class with related operations
 
 COORDINATION PATTERN:
@@ -14,12 +15,14 @@ to enable automatic coordination. For example, TransactionOperations receives
 Core so it can automatically create entity registry entries:
 
     # High-level API (Core usage):
-    core.transaction.create(amount=100, ...)  # Entity created automatically
+    with get_core() as core:
+        core.transaction.create(amount=100, ...)  # Entity created automatically
+        # All operations commit together on exit
 
     # Low-level API (standalone usage):
-    entity_id = core.entity.create("transactions")
-    ops = TransactionOperations(conn)
-    ops.create(entity_id, amount=100, ...)  # Requires explicit entity_id
+    with get_core() as core:
+        entity_id = core.entity.create("transactions")
+        # Operations commit together on exit
 
 This design preserves composition (no inheritance) while providing a clean
 high-level API that encapsulates implementation details.
@@ -31,17 +34,19 @@ All entity IDs are auto-generated UUIDs. This design choice:
 3. Ensures UUID v4 format compliance with collision retry
 4. Simplifies the API - users don't need to manage ID creation
 5. Both entity.create() and transaction.create() always generate new IDs
+
+CONNECTION LIFECYCLE (Session 6.5 Refactor):
+- Core enforces context manager usage via _in_context flag
+- Operations call core._get_conn() which raises RuntimeError if not in context
+- __enter__ sets _in_context=True, __exit__ sets _in_context=False
+- __exit__ commits on success, rollbacks on exception, always closes connection
 """
 
 import sqlite3
-from contextvars import ContextVar
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from system.config import default_settings as settings
-
-# Thread-local storage for atomic Core
-_core_context: ContextVar["Core"] = ContextVar("_core_context", default=None)
 
 if TYPE_CHECKING:
     from .entity import EntityOperations
@@ -59,20 +64,23 @@ class Core:
     Provides access to entity operations through properties.
 
     Connection Lifecycle:
-    - atomic=True: Connection closes on __exit__ from context manager
-    - atomic=False: Connection closes after each operation (autocommit)
+    - Core MUST be used as context manager (enforced at runtime)
+    - __enter__: Marks Core as active, returns self
+    - __exit__: Commits on success, rollbacks on exception, always closes
     """
 
-    def __init__(self, connection: sqlite3.Connection, atomic: bool = False):
+    def __init__(self, connection: sqlite3.Connection):
         """Initialize Core with a database connection.
 
         Args:
             connection: SQLite connection with row_factory set to sqlite3.Row
-            atomic: If True, Core MUST be used as context manager.
-                    If False, Core has autocommit semantics.
+
+        Note:
+            Core must be used as context manager. Operations will raise
+            RuntimeError if called outside of 'with' statement.
         """
         self._conn = connection
-        self._atomic = atomic
+        self._in_context = False  # Track if we're inside a context manager
         self._entity_ops = None
         self._transaction_ops = None
         self._recurrence_ops = None
@@ -88,7 +96,7 @@ class Core:
         """
         if self._entity_ops is None:
             from .entity import EntityOperations
-            self._entity_ops = EntityOperations(self._conn)
+            self._entity_ops = EntityOperations(self)
         return self._entity_ops
 
     @property
@@ -104,7 +112,7 @@ class Core:
         if self._transaction_ops is None:
             from .transaction import TransactionOperations
             # Pass self (Core) for entity coordination
-            self._transaction_ops = TransactionOperations(self._conn, core=self)
+            self._transaction_ops = TransactionOperations(self)
         return self._transaction_ops
 
     @property
@@ -120,7 +128,7 @@ class Core:
         if self._recurrence_ops is None:
             from .recurrence import RecurrenceOperations
             # Pass self (Core) for entity coordination
-            self._recurrence_ops = RecurrenceOperations(self._conn, core=self)
+            self._recurrence_ops = RecurrenceOperations(self)
         return self._recurrence_ops
 
     @property
@@ -132,7 +140,7 @@ class Core:
         """
         if self._relation_ops is None:
             from .relation import RelationOperations
-            self._relation_ops = RelationOperations(self._conn, core=self)
+            self._relation_ops = RelationOperations(self)
         return self._relation_ops
 
     @property
@@ -147,24 +155,32 @@ class Core:
         """
         if self._context_ops is None:
             from .context import ContextOperations
-            self._context_ops = ContextOperations(self._conn, core=self)
+            self._context_ops = ContextOperations(self)
         return self._context_ops
 
-    def __enter__(self) -> "Core":
-        """Enter context manager for atomic transaction.
+    def _get_conn(self) -> sqlite3.Connection:
+        """Get connection, enforcing context manager usage.
+
+        Returns:
+            SQLite connection
 
         Raises:
-            RuntimeError: If Core was not created with atomic=True
+            RuntimeError: If Core is not being used as context manager
+        """
+        if not self._in_context:
+            raise RuntimeError(
+                "Core must be used as context manager. "
+                "Use: with get_core() as core: ..."
+            )
+        return self._conn
+
+    def __enter__(self) -> "Core":
+        """Enter context manager for transaction.
 
         Returns:
             self for use in with-statement
         """
-        if not self._atomic:
-            raise RuntimeError(
-                "Core must be created with atomic=True for context manager use. "
-                "Use: with db.get_core(atomic=True) as core:"
-            )
-        _core_context.set(self)
+        self._in_context = True
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -175,6 +191,7 @@ class Core:
             exc_val: Exception value if exception occurred, else None
             exc_tb: Exception traceback if exception occurred, else None
         """
+        self._in_context = False
         try:
             if exc_type is None:
                 # No exception - commit the transaction
@@ -183,8 +200,7 @@ class Core:
                 # Exception occurred - rollback the transaction
                 self._conn.rollback()
         finally:
-            # Always clear context and close connection
-            _core_context.set(None)
+            # Always close connection
             self._conn.close()
 
     def __del__(self):
@@ -224,34 +240,27 @@ def _create_connection() -> sqlite3.Connection:
     return conn
 
 
-def get_core(atomic: bool = False) -> Core:
+def get_core() -> Core:
     """
     Get a database Core instance.
-
-    Args:
-        atomic: If True, returns a Core that MUST be used as context manager.
-                Use for multi-operation transactions that need to commit together.
-                If False (default), returns a Core with autocommit semantics.
-                Each operation commits independently, connection closes after operation.
 
     Returns:
         Core instance with entity/transaction operations
 
     Examples:
-        Autocommit mode (single operation):
-        >>> core = get_core()
-        >>> transaction = core.transaction.get_by_id(uuid)
-        >>> # Connection closes automatically
-
-        Atomic mode (multi-operation transaction):
-        >>> with get_core(atomic=True) as core:
+        Use Core as context manager for transactional operations:
+        >>> with get_core() as core:
         ...     uuid = core.entity.create("transactions")
         ...     core.transaction.create(uuid, amount=100, ...)
         ...     core.entity.supersede(old_id, uuid)
         ...     # All operations commit together on exit
+
+    Note:
+        Core MUST be used as context manager. Operations will raise
+        RuntimeError if called outside of 'with' statement.
     """
     conn = _create_connection()
-    return Core(conn, atomic=atomic)
+    return Core(conn)
 
 
 # ============================================================================
