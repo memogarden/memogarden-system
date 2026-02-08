@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from .recurrence import RecurrenceOperations
     from .relation import RelationOperations
     from .transaction import TransactionOperations
+    from .context import ContextOperations
 
 
 class Core:
@@ -76,6 +77,7 @@ class Core:
         self._transaction_ops = None
         self._recurrence_ops = None
         self._relation_ops = None
+        self._context_ops = None
 
     @property
     def entity(self) -> "EntityOperations":
@@ -132,6 +134,21 @@ class Core:
             from .relation import RelationOperations
             self._relation_ops = RelationOperations(self._conn, core=self)
         return self._relation_ops
+
+    @property
+    def context(self) -> "ContextOperations":
+        """Context frame and view stream operations (RFC-003).
+
+        Lazy-loaded to avoid circular import issues.
+        Operations are created on first access and cached.
+
+        Note: Passes self (Core) to ContextOperations so it can
+        coordinate entity registry operations automatically.
+        """
+        if self._context_ops is None:
+            from .context import ContextOperations
+            self._context_ops = ContextOperations(self._conn, core=self)
+        return self._context_ops
 
     def __enter__(self) -> "Core":
         """Enter context manager for atomic transaction.
