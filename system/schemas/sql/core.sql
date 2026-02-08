@@ -94,12 +94,17 @@ CREATE TABLE IF NOT EXISTS context_frame (
     containers JSON NOT NULL,         -- Array of container UUIDs (LRU ordered)
     created_at TEXT NOT NULL,
     parent_frame_uuid TEXT,
-    
+
+    -- RFC-003 v4: Scope activation (INV-11, INV-11a, INV-11b)
+    active_scopes JSON NOT NULL DEFAULT '[]',  -- Array of active scope UUIDs
+    primary_scope TEXT,                        -- Currently focused scope (NULL = no primary)
+
     FOREIGN KEY (parent_frame_uuid) REFERENCES context_frame(uuid)
 );
 
 CREATE INDEX IF NOT EXISTS idx_context_frame_participant ON context_frame(participant);
 CREATE INDEX IF NOT EXISTS idx_context_frame_project ON context_frame(project_uuid);
+CREATE INDEX IF NOT EXISTS idx_context_frame_primary_scope ON context_frame(primary_scope);
 
 -- ============================================================================
 -- TRIGGERS

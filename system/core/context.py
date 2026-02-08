@@ -139,6 +139,8 @@ class ContextFrame:
     ContextFrames maintain a list of recently visited object UUIDs,
     ordered by recency (most recent first). New visits evict the
     least-recently-used when at capacity (LRU-N eviction).
+
+    RFC-003 v4: Also tracks active scopes and primary scope for context verbs.
     """
     uuid: str  # ContextFrame UUID
     owner: str  # UUID of owner (Operator, Agent, or Scope)
@@ -148,6 +150,9 @@ class ContextFrame:
     created_at: str  # ISO 8601 timestamp
     parent_frame_uuid: str | None = None  # Parent if subordinate context
     is_subordinate: bool = False  # True if forked subordinate context
+    # RFC-003 v4: Scope activation (INV-11, INV-11a, INV-11b)
+    active_scopes: list[str] | None = None  # Active scope UUIDs
+    primary_scope: str | None = None  # Currently focused scope (NULL = no primary)
 
     def to_dict(self) -> dict:
         """Convert ContextFrame to dictionary for JSON serialization."""
@@ -159,7 +164,9 @@ class ContextFrame:
             'view_timeline': self.view_timeline,
             'created_at': self.created_at,
             'parent_frame_uuid': self.parent_frame_uuid,
-            'is_subordinate': self.is_subordinate
+            'is_subordinate': self.is_subordinate,
+            'active_scopes': self.active_scopes or [],
+            'primary_scope': self.primary_scope
         }
 
 
@@ -234,6 +241,16 @@ class ContextOperations:
         if row:
             # Parse JSON fields
             containers = json.loads(row['containers']) if row['containers'] else []
+            # Helper to safely get optional values from sqlite3.Row
+            def safe_get(key, default=None):
+                try:
+                    val = row[key]
+                    return val if val is not None else default
+                except (KeyError, IndexError):
+                    return default
+
+            active_scopes = json.loads(safe_get('active_scopes', '[]')) if safe_get('active_scopes') else []
+
             return ContextFrame(
                 uuid=row['uuid'],
                 owner=row['participant'],
@@ -242,7 +259,9 @@ class ContextOperations:
                 view_timeline=[],  # TODO: Query from entity table where _type='View'
                 created_at=row['created_at'],
                 parent_frame_uuid=row['parent_frame_uuid'],
-                is_subordinate=row['parent_frame_uuid'] is not None
+                is_subordinate=row['parent_frame_uuid'] is not None,
+                active_scopes=active_scopes if owner_type == 'operator' else None,
+                primary_scope=safe_get('primary_scope')
             )
 
         if not create_if_missing:
@@ -289,11 +308,17 @@ class ContextOperations:
         # For operators, store NULL in project_uuid; for agents/scopes, store owner_type
         project_uuid_value = None if owner_type == 'operator' else owner_type
 
+        # Initialize active_scopes and primary_scope
+        # Only operators can have active scopes (agents don't activate scopes)
+        active_scopes = [] if owner_type == 'operator' else None
+        primary_scope = None
+
         # Insert into database
         self._conn.execute(
-            """INSERT INTO context_frame (uuid, project_uuid, participant, containers, created_at, parent_frame_uuid)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (context_uuid, project_uuid_value, owner, json.dumps(containers), now, parent_frame_uuid)
+            """INSERT INTO context_frame (uuid, project_uuid, participant, containers, created_at, parent_frame_uuid, active_scopes, primary_scope)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (context_uuid, project_uuid_value, owner, json.dumps(containers), now, parent_frame_uuid,
+             json.dumps(active_scopes) if active_scopes is not None else '[]', primary_scope)
         )
 
         return ContextFrame(
@@ -304,7 +329,9 @@ class ContextOperations:
             view_timeline=[],
             created_at=now,
             parent_frame_uuid=parent_frame_uuid,
-            is_subordinate=is_subordinate
+            is_subordinate=is_subordinate,
+            active_scopes=active_scopes,
+            primary_scope=primary_scope
         )
 
     def get_context_frame_by_uuid(self, context_uuid: str) -> ContextFrame:
@@ -331,7 +358,16 @@ class ContextOperations:
                 {"context_uuid": context_uuid}
             )
 
+        # Helper to safely get optional values from sqlite3.Row
+        def safe_get(key, default=None):
+            try:
+                val = row[key]
+                return val if val is not None else default
+            except (KeyError, IndexError):
+                return default
+
         containers = json.loads(row['containers']) if row['containers'] else []
+        active_scopes = json.loads(safe_get('active_scopes', '[]')) if safe_get('active_scopes') else []
         owner_type = row['project_uuid'] or 'operator'
 
         return ContextFrame(
@@ -342,7 +378,9 @@ class ContextOperations:
             view_timeline=[],
             created_at=row['created_at'],
             parent_frame_uuid=row['parent_frame_uuid'],
-            is_subordinate=row['parent_frame_uuid'] is not None
+            is_subordinate=row['parent_frame_uuid'] is not None,
+            active_scopes=active_scopes if owner_type == 'operator' else None,
+            primary_scope=safe_get('primary_scope')
         )
 
     def update_containers(
@@ -548,6 +586,186 @@ class ContextOperations:
         for ctx in context_frames:
             self.append_view(ctx, view)
         # All updates commit together when atomic transaction exits
+
+    # =========================================================================
+    # CONTEXT VERB OPERATIONS (RFC-003 v4)
+    # =========================================================================
+
+    def enter_scope(
+        self,
+        context_frame: ContextFrame,
+        scope_uuid: str
+    ) -> ContextFrame:
+        """Enter a scope - add to active set.
+
+        Per RFC-003:
+        - INV-11: Explicit Scope Control (enter ≠ focus, requires confirmation)
+        - INV-11a: Focus Separation (enter does NOT auto-focus)
+
+        Args:
+            context_frame: The user's ContextFrame
+            scope_uuid: UUID of the scope to enter
+
+        Returns:
+            Updated ContextFrame
+
+        Raises:
+            ValidationError: If scope already in active set or not an operator context
+
+        Invariants:
+            - INV-11: Enter adds scope to active set but does NOT change primary
+            - INV-11a: Focus separation (no auto-focus)
+        """
+        # Only operators can have active scopes
+        if context_frame.owner_type != 'operator':
+            raise ValidationError(
+                f"Only operators can have active scopes, got {context_frame.owner_type}",
+                {"owner_type": context_frame.owner_type}
+            )
+
+        # Check if scope already in active set
+        active_scopes = context_frame.active_scopes or []
+        if scope_uuid in active_scopes:
+            raise ValidationError(
+                f"Scope '{scope_uuid}' already in active set",
+                {"scope_uuid": scope_uuid, "active_scopes": active_scopes}
+            )
+
+        # Add scope to active set
+        active_scopes.append(scope_uuid)
+
+        # Update in database
+        self._conn.execute(
+            "UPDATE context_frame SET active_scopes = ? WHERE uuid = ?",
+            (json.dumps(active_scopes), context_frame.uuid)
+        )
+
+        # If this is the first scope, set as primary (INV-11b: Implied Focus)
+        primary_scope = context_frame.primary_scope
+        if primary_scope is None:
+            primary_scope = scope_uuid
+            self._conn.execute(
+                "UPDATE context_frame SET primary_scope = ? WHERE uuid = ?",
+                (primary_scope, context_frame.uuid)
+            )
+
+        # Return updated ContextFrame
+        context_frame.active_scopes = active_scopes
+        context_frame.primary_scope = primary_scope
+        return context_frame
+
+    def leave_scope(
+        self,
+        context_frame: ContextFrame,
+        scope_uuid: str
+    ) -> ContextFrame:
+        """Leave a scope - remove from active set.
+
+        Per RFC-003:
+        - INV-8: Stream Suspension on Leave (scope view-stream suspends)
+        - Removing primary scope clears primary_scope
+
+        Args:
+            context_frame: The user's ContextFrame
+            scope_uuid: UUID of the scope to leave
+
+        Returns:
+            Updated ContextFrame
+
+        Raises:
+            ValidationError: If scope not in active set
+
+        Invariants:
+            - INV-8: Stream suspension on leave (no appends to scope view-stream)
+        """
+        # Only operators can have active scopes
+        if context_frame.owner_type != 'operator':
+            raise ValidationError(
+                f"Only operators can have active scopes, got {context_frame.owner_type}",
+                {"owner_type": context_frame.owner_type}
+            )
+
+        # Check if scope in active set
+        active_scopes = context_frame.active_scopes or []
+        if scope_uuid not in active_scopes:
+            raise ValidationError(
+                f"Scope '{scope_uuid}' not in active set",
+                {"scope_uuid": scope_uuid, "active_scopes": active_scopes}
+            )
+
+        # Remove scope from active set
+        active_scopes.remove(scope_uuid)
+
+        # Update primary_scope if needed
+        primary_scope = context_frame.primary_scope
+        if primary_scope == scope_uuid:
+            # Clear primary if we're leaving it
+            primary_scope = None
+            self._conn.execute(
+                "UPDATE context_frame SET primary_scope = ? WHERE uuid = ?",
+                (primary_scope, context_frame.uuid)
+            )
+
+        # Update in database
+        self._conn.execute(
+            "UPDATE context_frame SET active_scopes = ? WHERE uuid = ?",
+            (json.dumps(active_scopes), context_frame.uuid)
+        )
+
+        # Return updated ContextFrame
+        context_frame.active_scopes = active_scopes
+        context_frame.primary_scope = primary_scope
+        return context_frame
+
+    def focus_scope(
+        self,
+        context_frame: ContextFrame,
+        scope_uuid: str
+    ) -> ContextFrame:
+        """Focus a scope - switch primary scope among active scopes.
+
+        Per RFC-003:
+        - INV-11: Explicit Scope Control (focus requires explicit action)
+        - INV-11a: Focus Separation (enter does NOT auto-focus)
+
+        Args:
+            context_frame: The user's ContextFrame
+            scope_uuid: UUID of the scope to focus (must be in active set)
+
+        Returns:
+            Updated ContextFrame
+
+        Raises:
+            ValidationError: If scope not in active set or not an operator context
+
+        Invariants:
+            - INV-11: Explicit scope control (focus requires explicit action)
+            - INV-11a: Focus separation
+        """
+        # Only operators can have active scopes
+        if context_frame.owner_type != 'operator':
+            raise ValidationError(
+                f"Only operators can have active scopes, got {context_frame.owner_type}",
+                {"owner_type": context_frame.owner_type}
+            )
+
+        # Check if scope in active set
+        active_scopes = context_frame.active_scopes or []
+        if scope_uuid not in active_scopes:
+            raise ValidationError(
+                f"Cannot focus scope '{scope_uuid}' - not in active set. Use enter first.",
+                {"scope_uuid": scope_uuid, "active_scopes": active_scopes}
+            )
+
+        # Update primary_scope
+        self._conn.execute(
+            "UPDATE context_frame SET primary_scope = ? WHERE uuid = ?",
+            (scope_uuid, context_frame.uuid)
+        )
+
+        # Return updated ContextFrame
+        context_frame.primary_scope = scope_uuid
+        return context_frame
 
     # =========================================================================
     # HELPER FUNCTIONS

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import sqlite3
 import json
+import sqlite3
+from datetime import UTC
 from pathlib import Path
-from typing import Literal
 
-from .item import Item, Evidence, generate_soil_uuid, current_day, SOIL_UUID_PREFIX
+from .item import SOIL_UUID_PREFIX, Evidence, Item, current_day, generate_soil_uuid
 from .relation import SystemRelation
 
 
@@ -39,7 +39,7 @@ class Soil:
             self._conn.close()
             self._conn = None
 
-    def __enter__(self) -> "Soil":
+    def __enter__(self) -> Soil:
         self._get_connection()
         return self
 
@@ -61,7 +61,7 @@ class Soil:
         if not schema_path.exists():
             raise FileNotFoundError(f"Schema file not found: {schema_path}")
 
-        with open(schema_path, "r") as f:
+        with open(schema_path) as f:
             schema_sql = f.read()
 
         conn = self._get_connection()
@@ -146,6 +146,35 @@ class Soil:
             data=json.loads(row["data"]),
             metadata=json.loads(row["metadata"]) if row["metadata"] else None,
         )
+
+    def mark_superseded(self, original_uuid: str, superseded_by_uuid: str, superseded_at: str) -> bool:
+        """Mark an Item as superseded by another Item.
+
+        Updates the original Item's superseded_by and superseded_at fields
+        to indicate it has been replaced by a new version.
+
+        Args:
+            original_uuid: UUID of the Item being superseded
+            superseded_by_uuid: UUID of the new Item that supersedes it
+            superseded_at: ISO 8601 timestamp when supersession occurred
+
+        Returns:
+            True if Item was found and updated, False if not found
+        """
+        # Ensure UUIDs have prefix
+        if not original_uuid.startswith(SOIL_UUID_PREFIX):
+            original_uuid = f"{SOIL_UUID_PREFIX}{original_uuid}"
+        if not superseded_by_uuid.startswith(SOIL_UUID_PREFIX):
+            superseded_by_uuid = f"{SOIL_UUID_PREFIX}{superseded_by_uuid}"
+
+        conn = self._get_connection()
+        cursor = conn.execute(
+            """UPDATE item
+               SET superseded_by = ?, superseded_at = ?
+               WHERE uuid = ?""",
+            (superseded_by_uuid, superseded_at, original_uuid)
+        )
+        return cursor.rowcount > 0
 
     def find_item_by_rfc_message_id(self, message_id: str) -> Item | None:
         """Find Email item by RFC Message-ID.
@@ -425,7 +454,7 @@ def create_email_item(**kwargs) -> Item:
     Returns:
         Email Item
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     # Extract data fields
     data = kwargs.get("data", {})
@@ -433,7 +462,7 @@ def create_email_item(**kwargs) -> Item:
     return Item(
         uuid=generate_soil_uuid(),
         _type=kwargs.get("_type", "Email"),
-        realized_at=kwargs.get("realized_at", datetime.now(timezone.utc).isoformat()),
+        realized_at=kwargs.get("realized_at", datetime.now(UTC).isoformat()),
         canonical_at=kwargs.get("canonical_at", data.get("sent_at")),
         fidelity=kwargs.get("fidelity", "full"),
         data=data,
