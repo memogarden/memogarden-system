@@ -46,6 +46,7 @@ _core_context: ContextVar["Core"] = ContextVar("_core_context", default=None)
 if TYPE_CHECKING:
     from .entity import EntityOperations
     from .recurrence import RecurrenceOperations
+    from .relation import RelationOperations
     from .transaction import TransactionOperations
 
 
@@ -74,6 +75,7 @@ class Core:
         self._entity_ops = None
         self._transaction_ops = None
         self._recurrence_ops = None
+        self._relation_ops = None
 
     @property
     def entity(self) -> "EntityOperations":
@@ -118,6 +120,18 @@ class Core:
             # Pass self (Core) for entity coordination
             self._recurrence_ops = RecurrenceOperations(self._conn, core=self)
         return self._recurrence_ops
+
+    @property
+    def relation(self) -> "RelationOperations":
+        """User relation operations with time horizon tracking (RFC-002).
+
+        Lazy-loaded to avoid circular import issues.
+        Operations are created on first access and cached.
+        """
+        if self._relation_ops is None:
+            from .relation import RelationOperations
+            self._relation_ops = RelationOperations(self._conn, core=self)
+        return self._relation_ops
 
     def __enter__(self) -> "Core":
         """Enter context manager for atomic transaction.

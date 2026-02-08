@@ -28,6 +28,29 @@ def generate_uuid() -> str:
     return str(uuid4())
 
 
+def generate(prefix: str = "") -> str:
+    """Generate a UUID with optional prefix.
+
+    This is a convenience function that combines generate_uuid() with prefix.
+
+    Args:
+        prefix: Optional prefix (e.g., "core_", "soil_")
+
+    Returns:
+        UUID with prefix (e.g., "core_a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+
+    Examples:
+        >>> uid.generate()  # Plain UUID
+        "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        >>> uid.generate("core_")  # Core UUID
+        "core_a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+    """
+    uuid_str = generate_uuid()
+    if prefix:
+        return f"{prefix}{uuid_str}"
+    return uuid_str
+
+
 def add_core_prefix(uuid: str) -> str:
     """Add core_ prefix to a UUID if not already present.
 

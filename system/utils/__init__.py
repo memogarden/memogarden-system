@@ -11,6 +11,6 @@ Import convention: use module-level imports for clarity.
     occurrences = recurrence.generate_occurrences(rrule, start, end)
 """
 
-from . import isodatetime, secret, uid, recurrence, hash_chain
+from . import isodatetime, secret, time, uid, recurrence, hash_chain
 
-__all__ = ["isodatetime", "secret", "uid", "recurrence", "hash_chain"]
+__all__ = ["isodatetime", "secret", "time", "uid", "recurrence", "hash_chain"]

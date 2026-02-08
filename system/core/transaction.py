@@ -173,7 +173,7 @@ class TransactionOperations:
 
         return transaction_id
 
-    def list(
+    def list_transactions(
         self,
         filters: dict[str, Any],
         limit: int = 100,
