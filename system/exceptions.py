@@ -35,3 +35,15 @@ class AuthenticationError(MemoGardenError):
     """Exception raised when authentication fails."""
 
     pass
+
+
+class LockConflictError(MemoGardenError):
+    """Exception raised when an optimistic locking conflict occurs."""
+
+    pass
+
+
+class PermissionDenied(MemoGardenError):
+    """Exception raised when access is denied due to insufficient permissions."""
+
+    pass
