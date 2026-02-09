@@ -6,6 +6,12 @@ authors = ["MemoGarden Contributors"]
 readme = "README.md"
 packages = [{include = "system"}]
 
+# Include schema files in the package distribution (RFC-004)
+include = [
+    "system/schemas/**/*.sql",
+    "system/schemas/**/*.json",
+]
+
 [tool.poetry.dependencies]
 python = "^3.13"
 

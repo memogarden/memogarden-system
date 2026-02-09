@@ -99,14 +99,21 @@ class Soil:
     # ==========================================================================
 
     def init_schema(self):
-        """Initialize database schema from bundled schema.sql."""
-        from pathlib import Path
-        schema_path = Path(__file__).parent.parent / "schemas" / "sql" / "soil.sql"
-        if not schema_path.exists():
-            raise FileNotFoundError(f"Schema file not found: {schema_path}")
+        """Initialize database schema from bundled schema.sql.
 
-        with open(schema_path) as f:
-            schema_sql = f.read()
+        Uses RFC-004 schema access utilities:
+        - Tries importlib.resources first (bundled package)
+        - Falls back to file reading (development mode)
+        """
+        from system.schemas import get_sql_schema
+
+        try:
+            schema_sql = get_sql_schema('soil')
+        except FileNotFoundError as e:
+            raise RuntimeError(
+                f"Failed to load Soil schema: {e}\n"
+                "Ensure schemas are bundled in system/schemas/sql/"
+            ) from e
 
         conn = self._get_connection()
         conn.executescript(schema_sql)
@@ -290,6 +297,65 @@ class Soil:
             ))
         return items
 
+    def search_items(
+        self,
+        query: str,
+        coverage: str = "content",
+        limit: int = 20
+    ) -> list[sqlite3.Row]:
+        """Search items (facts) by fuzzy text matching.
+
+        Session 9: Public API for fact/item search.
+        Uses SQLite LIKE with wildcards for fuzzy matching.
+
+        Args:
+            query: Search string (will be wrapped with % wildcards)
+            coverage: Coverage level - "names" (_type only), "content" (_type+data), "full" (all fields)
+            limit: Maximum results to return
+
+        Returns:
+            List of matching item rows (raw database rows, not Item objects)
+
+        Note:
+            Results ordered by realized_at DESC (most recent first)
+            Returns sqlite3.Row objects for efficiency (handler converts to dict)
+        """
+        # Build search pattern with wildcards
+        search_pattern = f"%{query}%"
+
+        # Build WHERE clause based on coverage level
+        where_conditions = []
+        params = []
+
+        if coverage == "names":
+            # Search in item type only
+            where_conditions.append("_type LIKE ?")
+            params.append(search_pattern)
+        elif coverage == "content":
+            # Search in type and JSON data
+            where_conditions.append("(_type LIKE ? OR data LIKE ?)")
+            params.extend([search_pattern, search_pattern])
+        else:  # full
+            # Search all fields
+            where_conditions.append("(_type LIKE ? OR data LIKE ? OR metadata LIKE ?)")
+            params.extend([search_pattern, search_pattern, search_pattern])
+
+        # Build query
+        sql = f"""
+            SELECT uuid, _type, data, integrity_hash,
+                   realized_at, canonical_at, metadata, fidelity
+            FROM item
+            WHERE {' AND '.join(where_conditions) if where_conditions else '1=1'}
+            ORDER BY realized_at DESC
+            LIMIT ?
+        """
+        params.append(limit)
+
+        # Execute query
+        conn = self._get_connection()
+        cursor = conn.execute(sql, params)
+        return cursor.fetchall()
+
     # ==========================================================================
     # SYSTEM RELATION OPERATIONS
     # ==========================================================================
@@ -458,16 +524,37 @@ class Soil:
 # CONVENIENCE FUNCTIONS
 # ============================================================================
 
-def get_soil(db_path: str | Path = "soil.db", init: bool = False) -> Soil:
+def get_soil(db_path: str | Path | None = None, init: bool = False) -> Soil:
     """Get or create Soil database.
 
+    Database path is resolved via RFC-004:
+    - db_path if provided (explicit path, backward compatible)
+    - Otherwise get_db_path('soil') using environment variables
+
     Args:
-        db_path: Path to SQLite database file
+        db_path: Path to SQLite database file. If None, resolved via
+            get_db_path('soil') using environment variables.
         init: If True, initialize schema if not exists
 
     Returns:
         Soil instance
+
+    Examples:
+        >>> # Environment variable resolution
+        >>> os.environ['MEMOGARDEN_SOIL_DB'] = '/custom/soil.db'
+        >>> soil = get_soil()
+
+        >>> # Explicit path (backward compatible)
+        >>> soil = get_soil('/path/to/soil.db')
+
+        >>> # Default (current directory)
+        >>> soil = get_soil()
     """
+    # Resolve database path (RFC-004)
+    if db_path is None:
+        from system.host.environment import get_db_path
+        db_path = get_db_path('soil')
+
     soil = Soil(db_path)
 
     if init:

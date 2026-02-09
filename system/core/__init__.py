@@ -228,8 +228,18 @@ def _create_connection() -> sqlite3.Connection:
     Note:
         WAL (Write-Ahead Logging) mode allows better concurrent access
         by enabling readers to proceed without blocking writers.
+
+        Database path is resolved via RFC-004:
+        - settings.database_path if provided (explicit path, backward compatible)
+        - Otherwise get_db_path('core') using environment variables
     """
-    db_path = Path(settings.database_path)
+    # Resolve database path (RFC-004)
+    if settings.database_path is None:
+        from system.host.environment import get_db_path
+        db_path = get_db_path('core')
+    else:
+        db_path = Path(settings.database_path)
+
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     conn = sqlite3.connect(str(db_path))
@@ -363,8 +373,18 @@ def init_db():
 
     Also checks schema version and applies migrations if the database exists
     but is at an older schema version.
+
+    Database path is resolved via RFC-004:
+    - settings.database_path if provided (explicit path, backward compatible)
+    - Otherwise get_db_path('core') using environment variables
     """
-    db_path = Path(settings.database_path)
+    # Resolve database path (RFC-004)
+    if settings.database_path is None:
+        from system.host.environment import get_db_path
+        db_path = get_db_path('core')
+    else:
+        db_path = Path(settings.database_path)
+
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     with sqlite3.connect(str(db_path)) as db:
@@ -378,14 +398,16 @@ def init_db():
             return
 
         # Fresh database - apply current schema
-        schema_path = Path(__file__).parent.parent / "schemas" / "sql" / "core.sql"
-        if schema_path.exists():
-            with open(schema_path, "r") as f:
-                schema_sql = f.read()
-            db.executescript(schema_sql)
-            db.commit()
-        else:
+        # Use RFC-004 schema access utilities
+        from system.schemas import get_sql_schema
+
+        try:
+            schema_sql = get_sql_schema('core')
+        except FileNotFoundError as e:
             raise RuntimeError(
-                f"Schema file not found: {schema_path}\n"
+                f"Failed to load Core schema: {e}\n"
                 "Ensure schemas are bundled in system/schemas/sql/"
-            )
+            ) from e
+
+        db.executescript(schema_sql)
+        db.commit()
