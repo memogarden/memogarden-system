@@ -386,3 +386,156 @@ class RelationOperations:
         """
         row = self.get_by_id(relation_id)
         return row["time_horizon"] >= current_day()
+
+    def delete(self, relation_id: str) -> None:
+        """Delete a user relation.
+
+        This permanently removes the relation from the database.
+        Per RFC-002, user relations can be deleted by the operator
+        who created them or by system operations.
+
+        Args:
+            relation_id: The UUID of the relation (plain or with core_ prefix)
+
+        Raises:
+            ResourceNotFound: If relation_id doesn't exist
+        """
+        from ..exceptions import ResourceNotFound
+
+        # Strip prefix if provided
+        relation_id = uid.strip_prefix(relation_id)
+
+        cursor = self._conn.execute(
+            """DELETE FROM user_relation WHERE uuid = ?""",
+            (relation_id,)
+        )
+        self._conn.commit()
+
+        if cursor.rowcount == 0:
+            raise ResourceNotFound(f"User relation not found: {relation_id}")
+
+    def edit(
+        self,
+        relation_id: str,
+        time_horizon: int | None = None,
+        metadata: dict | None = None,
+        evidence: dict | None = None,
+    ) -> None:
+        """Edit relation attributes.
+
+        Allows updating editable relation attributes:
+        - time_horizon: Set a new time horizon (for manual adjustment)
+        - metadata: Update relation metadata
+        - evidence: Update relation evidence
+
+        Args:
+            relation_id: The UUID of the relation (plain or with core_ prefix)
+            time_horizon: New time horizon (days since epoch), or None to keep current
+            metadata: New metadata dict, or None to keep current
+            evidence: New evidence dict, or None to keep current
+
+        Raises:
+            ResourceNotFound: If relation_id doesn't exist
+        """
+        from ..exceptions import ResourceNotFound
+
+        # Strip prefix if provided
+        relation_id = uid.strip_prefix(relation_id)
+
+        # Build dynamic update query
+        updates = []
+        params = []
+
+        if time_horizon is not None:
+            updates.append("time_horizon = ?")
+            params.append(time_horizon)
+
+        if metadata is not None:
+            updates.append("metadata = ?")
+            params.append(json.dumps(metadata))
+
+        if evidence is not None:
+            updates.append("evidence = ?")
+            params.append(json.dumps(evidence))
+
+        if not updates:
+            # Nothing to update
+            return
+
+        # Add relation_id to params
+        params.append(relation_id)
+
+        query = f"""UPDATE user_relation SET {', '.join(updates)} WHERE uuid = ?"""
+        cursor = self._conn.execute(query, params)
+        self._conn.commit()
+
+        if cursor.rowcount == 0:
+            raise ResourceNotFound(f"User relation not found: {relation_id}")
+
+    def query(
+        self,
+        source: str | None = None,
+        target: str | None = None,
+        kind: str | None = None,
+        source_type: str | None = None,
+        target_type: str | None = None,
+        alive_only: bool = True,
+        limit: int = 100,
+    ) -> list[sqlite3.Row]:
+        """Query user relations with filters.
+
+        Args:
+            source: Filter by source UUID (prefixed or non-prefixed)
+            target: Filter by target UUID (prefixed or non-prefixed)
+            kind: Filter by relation kind
+            source_type: Filter by source type
+            target_type: Filter by target type
+            alive_only: If True, only return alive relations
+            limit: Maximum number of results
+
+        Returns:
+            List of sqlite3.Row with relation data
+        """
+        # Strip prefixes if provided
+        if source:
+            source = uid.strip_prefix(source)
+        if target:
+            target = uid.strip_prefix(target)
+
+        # Build query dynamically
+        conditions = []
+        params = []
+
+        if source is not None:
+            conditions.append("source = ?")
+            params.append(source)
+
+        if target is not None:
+            conditions.append("target = ?")
+            params.append(target)
+
+        if kind is not None:
+            conditions.append("kind = ?")
+            params.append(kind)
+
+        if source_type is not None:
+            conditions.append("source_type = ?")
+            params.append(source_type)
+
+        if target_type is not None:
+            conditions.append("target_type = ?")
+            params.append(target_type)
+
+        if alive_only:
+            today = current_day()
+            conditions.append("time_horizon >= ?")
+            params.append(today)
+
+        # Add limit
+        params.append(limit)
+
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+        query = f"""SELECT * FROM user_relation WHERE {where_clause} LIMIT ?"""
+
+        rows = self._conn.execute(query, params).fetchall()
+        return list(rows)

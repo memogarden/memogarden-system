@@ -337,3 +337,133 @@ class EntityOperations:
         """
         current_hash = self.get_current_hash(entity_id)
         return current_hash != based_on_hash
+
+    def query_with_filters(
+        self,
+        entity_type: str | None = None,
+        include_superseded: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[sqlite3.Row], int]:
+        """Query entities with filters.
+
+        Args:
+            entity_type: Filter by entity type (None = all types)
+            include_superseded: If True, include superseded entities (default: False)
+            limit: Maximum number of results
+            offset: Number of results to skip
+
+        Returns:
+            Tuple of (list of entity rows, total count)
+        """
+        # Build WHERE clause
+        where_parts = []
+        params = []
+
+        # Filter by type
+        if entity_type:
+            where_parts.append("type = ?")
+            params.append(entity_type)
+
+        # Filter by superseded status (default: exclude superseded)
+        if not include_superseded:
+            where_parts.append("superseded_by IS NULL")
+
+        # Build full query
+        where_clause = " AND ".join(where_parts) if where_parts else "1=1"
+        query = f"""
+            SELECT * FROM entity
+            WHERE {where_clause}
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+        """
+
+        params.extend([limit, offset])
+
+        # Execute query
+        rows = self._conn.execute(query, params).fetchall()
+
+        # Get total count
+        count_query = f"SELECT COUNT(*) as total FROM entity WHERE {where_clause}"
+        total_row = self._conn.execute(count_query, params[:-2]).fetchone()
+        total = total_row["total"]
+
+        return rows, total
+
+    def search(
+        self,
+        query: str,
+        coverage: str = "content",
+        limit: int = 20
+    ) -> list[sqlite3.Row]:
+        """Search entities by fuzzy text matching.
+
+        Session 9: Public API for entity search.
+        Uses SQLite LIKE with wildcards for fuzzy matching.
+
+        Args:
+            query: Search string (will be wrapped with % wildcards)
+            coverage: Coverage level - "names" (type only), "content" (type+data), "full" (all fields)
+            limit: Maximum results to return
+
+        Returns:
+            List of matching entity rows
+
+        Note:
+            Only returns active entities (superseded_by IS NULL)
+            Results ordered by updated_at DESC (most recent first)
+        """
+        # Build search pattern with wildcards
+        search_pattern = f"%{query}%"
+
+        # Build WHERE clause based on coverage level
+        where_conditions = ["superseded_by IS NULL"]  # Only active entities
+        params = []
+
+        if coverage == "names":
+            # Search in entity type only
+            where_conditions.append("type LIKE ?")
+            params.append(search_pattern)
+        elif coverage == "content":
+            # Search in type and JSON data
+            where_conditions.append("(type LIKE ? OR data LIKE ?)")
+            params.extend([search_pattern, search_pattern])
+        else:  # full
+            # Search all searchable fields (entity table has no metadata column)
+            where_conditions.append("(type LIKE ? OR data LIKE ?)")
+            params.extend([search_pattern, search_pattern])
+
+        # Build query
+        sql = f"""
+            SELECT uuid, type, data, hash, previous_hash, version,
+                   created_at, updated_at, superseded_by, superseded_at,
+                   group_id, derived_from
+            FROM entity
+            WHERE {' AND '.join(where_conditions)}
+            ORDER BY updated_at DESC
+            LIMIT ?
+        """
+        params.append(limit)
+
+        # Execute query
+        cursor = self._conn.execute(sql, params)
+        return cursor.fetchall()
+
+    def exists(self, entity_id: str) -> bool:
+        """Check if an entity exists.
+
+        Args:
+            entity_id: The UUID of the entity (plain or with prefix)
+
+        Returns:
+            True if entity exists, False otherwise
+        """
+        # Strip prefix if provided
+        entity_id = uid.strip_prefix(entity_id)
+
+        row = self._conn.execute(
+            "SELECT 1 FROM entity WHERE uuid = ?",
+            (entity_id,)
+        ).fetchone()
+
+        return row is not None

@@ -19,9 +19,25 @@
           "additionalProperties": true
         },
         "error": {
-          "type": ["string", "null"],
-          "description": "Error message (if operation failed)",
-          "examples": ["Entity not found", "Validation failed: amount must be positive"]
+          "type": ["object", "null"],
+          "description": "Error details (if operation failed)",
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": ["validation_error", "not_found", "lock_conflict", "permission_denied", "internal_error"],
+              "description": "Machine-readable error code"
+            },
+            "message": {
+              "type": "string",
+              "description": "Human-readable error description"
+            },
+            "details": {
+              "type": "object",
+              "description": "Additional error context (optional)",
+              "additionalProperties": true
+            }
+          },
+          "required": ["code", "message"]
         },
         "result_summary": {
           "type": ["string", "null"],
