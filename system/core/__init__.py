@@ -158,6 +158,18 @@ class Core:
             self._context_ops = ContextOperations(self)
         return self._context_ops
 
+    def has_admin_user(self) -> bool:
+        """Check if any admin users exist in the database.
+
+        Returns:
+            True if at least one admin user exists, False otherwise
+        """
+        cursor = self._get_conn().execute(
+            "SELECT COUNT(*) as count FROM users WHERE is_admin = 1"
+        )
+        row = cursor.fetchone()
+        return row["count"] > 0
+
     def _get_conn(self) -> sqlite3.Connection:
         """Get connection, enforcing context manager usage.
 

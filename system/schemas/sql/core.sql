@@ -107,6 +107,38 @@ CREATE INDEX IF NOT EXISTS idx_context_frame_project ON context_frame(project_uu
 CREATE INDEX IF NOT EXISTS idx_context_frame_primary_scope ON context_frame(primary_scope);
 
 -- ============================================================================
+-- AUTHENTICATION TABLES
+-- ============================================================================
+
+-- Users table for authentication (RFC-004)
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    is_admin INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (id) REFERENCES entity(uuid) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+
+-- API keys table for token-based authentication (RFC-004)
+CREATE TABLE IF NOT EXISTS api_keys (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    key_hash TEXT NOT NULL,
+    key_prefix TEXT NOT NULL,
+    expires_at TEXT,
+    created_at TEXT NOT NULL,
+    last_seen TEXT,
+    revoked_at TEXT,
+    FOREIGN KEY (id) REFERENCES entity(uuid) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id);
+CREATE INDEX IF NOT EXISTS idx_api_keys_active ON api_keys(revoked_at) WHERE revoked_at IS NULL;
+
+-- ============================================================================
 -- TRIGGERS
 -- ============================================================================
 
