@@ -25,13 +25,17 @@ class Soil:
         """Initialize Soil database.
 
         Args:
-            db_path: Path to SQLite database file
+            db_path: Path to SQLite database file or SQLite URI connection string
 
         Note:
             Soil must be used as context manager. Operations will raise
             RuntimeError if called outside of 'with' statement.
         """
-        self.db_path = Path(db_path)
+        # Preserve URI strings, convert file paths to Path objects
+        if isinstance(db_path, str) and db_path.startswith("file:"):
+            self.db_path = db_path  # Keep URI as string
+        else:
+            self.db_path = Path(db_path)
         self._conn: sqlite3.Connection | None = None
         self._in_context = False  # Track if we're inside a context manager
 
@@ -50,8 +54,18 @@ class Soil:
                 "Use: with get_soil() as soil: ..."
             )
         if self._conn is None:
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            self._conn = sqlite3.connect(str(self.db_path))
+            # Detect if db_path is a SQLite URI
+            is_uri = isinstance(self.db_path, str) and self.db_path.startswith("file:")
+
+            # Only create parent directory if not a URI path
+            if not is_uri:
+                self.db_path.parent.mkdir(parents=True, exist_ok=True)
+                db_path = str(self.db_path)
+            else:
+                db_path = self.db_path  # Use URI as-is
+
+            # Use uri=True for URI paths
+            self._conn = sqlite3.connect(db_path, uri=is_uri)
             self._conn.row_factory = sqlite3.Row
             self._conn.execute("PRAGMA foreign_keys = ON")
             self._conn.execute("PRAGMA journal_mode = WAL")
