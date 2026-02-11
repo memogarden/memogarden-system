@@ -17,7 +17,7 @@ Context Resolution (RFC-004 Section 4.1):
 """
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 

@@ -52,7 +52,9 @@ def load_toml_config(config_path: Path) -> dict[str, Any]:
     with open(config_path, "rb") as f:
         try:
             return tomllib.load(f)
-        except Exception as e:
+        except OSError as e:
+            raise ValueError(f"Cannot read {config_path}: {e}")
+        except (tomllib.TOMLDecodeError, ValueError) as e:
             raise ValueError(f"Invalid TOML in {config_path}: {e}")
 
 
