@@ -3,14 +3,15 @@
 This module provides settings for the system package following RFC 004.
 Configuration is loaded from TOML files with support for multiple deployment contexts.
 
-Configuration Resolution Order (RFC 004):
-1. Explicit config path (--config flag)
-2. Context-based defaults (serve/run/deploy verbs)
+Configuration Resolution Order (RFC 004 Section 5.3):
+1. Environment variables (highest priority)
+2. TOML config file
 3. Built-in defaults
 
 For the full application, use the API package's config which extends this.
 """
 
+import os
 import sys
 from pathlib import Path
 from typing import Optional, Any
@@ -173,49 +174,90 @@ class Settings:
         if config_path.exists():
             try:
                 self._config = load_toml_config(config_path)
-                self._apply_config()
             except (ImportError, ValueError) as e:
                 # Log warning but continue with defaults
                 import warnings
                 warnings.warn(f"Failed to load config from {config_path}: {e}")
 
-    def _apply_config(self):
-        """Apply TOML configuration to settings.
+        # Always apply config (env vars + TOML + defaults)
+        # This ensures profile settings are applied even without a config file
+        self._apply_config()
 
-        Applies settings in order:
+    def _apply_config(self):
+        """Apply TOML configuration to settings (RFC 004 Section 5.3).
+
+        Applies settings in order (env var > TOML > default):
         1. Resource profile defaults
-        2. Runtime overrides
+        2. Environment variable overrides (highest priority)
+        3. TOML runtime overrides
         """
-        # Get resource profile
+        # Get resource profile from env var or TOML
         runtime_config = self._config.get("runtime", {})
-        resource_profile = runtime_config.get("resource_profile", "standard")
+        resource_profile = os.environ.get(
+            "MEMOGARDEN_RESOURCE_PROFILE",
+            runtime_config.get("resource_profile", "standard")
+        )
         profile_settings = ResourceProfile.get_profile(resource_profile)
 
-        # Apply profile settings (can be overridden by explicit values)
+        # Apply profile settings as base defaults
         for key, value in profile_settings.items():
             setattr(self, key, value)
 
-        # Apply runtime overrides
+        # Apply environment variable overrides (RFC 004 Section 5.3)
+        # Env vars take precedence over TOML values
+        if "MEMOGARDEN_BIND_ADDRESS" in os.environ:
+            self.bind_address = os.environ["MEMOGARDEN_BIND_ADDRESS"]
+        if "MEMOGARDEN_BIND_PORT" in os.environ:
+            self.bind_port = int(os.environ["MEMOGARDEN_BIND_PORT"])
+        if "MEMOGARDEN_LOG_LEVEL" in os.environ:
+            self.log_level = os.environ["MEMOGARDEN_LOG_LEVEL"]
+        if "MEMOGARDEN_ENCRYPTION" in os.environ:
+            self.encryption = os.environ["MEMOGARDEN_ENCRYPTION"]
+
+        # Apply TOML runtime overrides (only if env var not set)
         for key, value in runtime_config.items():
             if key != "resource_profile":
-                setattr(self, key, value)
+                # Check if env var override exists
+                env_var_name = f"MEMOGARDEN_{key.upper()}"
+                if env_var_name not in os.environ:
+                    setattr(self, key, value)
 
-        # Apply network settings
+        # Apply network settings (env var > TOML > default)
         network_config = self._config.get("network", {})
-        self.bind_address = network_config.get("bind_address", "127.0.0.1")
-        self.bind_port = network_config.get("bind_port", 8080)
+        self.bind_address = os.environ.get(
+            "MEMOGARDEN_BIND_ADDRESS",
+            network_config.get("bind_address", "127.0.0.1")
+        )
+        self.bind_port = int(os.environ.get(
+            "MEMOGARDEN_BIND_PORT",
+            str(network_config.get("bind_port", 8080))
+        ))
 
-        # Apply security settings
+        # Apply security settings (env var > TOML > default)
         security_config = self._config.get("security", {})
-        self.encryption = security_config.get("encryption", "disabled")
+        self.encryption = os.environ.get(
+            "MEMOGARDEN_ENCRYPTION",
+            security_config.get("encryption", "disabled")
+        )
 
-        # Apply path overrides (optional)
+        # Apply path overrides (env var > TOML > default)
         paths_config = self._config.get("paths", {})
-        if paths_config.get("data_dir"):
+        data_dir_env = os.environ.get("MEMOGARDEN_DATA_DIR")
+        if data_dir_env:
+            self.data_dir = Path(data_dir_env)
+        elif paths_config.get("data_dir"):
             self.data_dir = Path(paths_config["data_dir"])
-        if paths_config.get("config_dir"):
+
+        config_dir_env = os.environ.get("MEMOGARDEN_CONFIG_DIR")
+        if config_dir_env:
+            self.config_dir = Path(config_dir_env)
+        elif paths_config.get("config_dir"):
             self.config_dir = Path(paths_config["config_dir"])
-        if paths_config.get("log_dir"):
+
+        log_dir_env = os.environ.get("MEMOGARDEN_LOG_DIR")
+        if log_dir_env:
+            self.log_dir = Path(log_dir_env)
+        elif paths_config.get("log_dir"):
             self.log_dir = Path(paths_config["log_dir"])
 
     def get(self, key: str, default: Any = None) -> Any:
