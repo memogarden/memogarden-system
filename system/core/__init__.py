@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     from .relation import RelationOperations
     from .transaction import TransactionOperations
     from .context import ContextOperations
+    from .artifact import ArtifactOperations
 
 
 class Core:
@@ -86,6 +87,7 @@ class Core:
         self._recurrence_ops = None
         self._relation_ops = None
         self._context_ops = None
+        self._artifact_ops = None
 
     @property
     def entity(self) -> "EntityOperations":
@@ -157,6 +159,21 @@ class Core:
             from .context import ContextOperations
             self._context_ops = ContextOperations(self)
         return self._context_ops
+
+    @property
+    def artifact(self) -> "ArtifactOperations":
+        """Artifact delta operations for Project Studio.
+
+        Lazy-loaded to avoid circular import issues.
+        Operations are created on first access and cached.
+
+        Note: Passes self (Core) to ArtifactOperations so it can
+        coordinate entity registry operations automatically.
+        """
+        if self._artifact_ops is None:
+            from .artifact import ArtifactOperations
+            self._artifact_ops = ArtifactOperations(self)
+        return self._artifact_ops
 
     def has_admin_user(self) -> bool:
         """Check if any admin users exist in the database.

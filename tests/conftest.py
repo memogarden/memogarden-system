@@ -2,7 +2,10 @@
 
 import pytest
 import tempfile
+import sqlite3
+from pathlib import Path
 from system.core import get_core, init_db as init_core_db
+from system.host.environment import get_db_path
 
 
 @pytest.fixture(autouse=True)
@@ -12,7 +15,38 @@ def clean_database_before_tests():
     This ensures that data from previous test runs doesn't interfere.
     Runs automatically before all tests in the module.
     """
-    init_core_db()  # Initialize database
+    init_core_db()  # Initialize Core database
+
+    # Initialize Soil database
+    from system.soil import get_soil
+    from system.schemas import get_sql_schema
+
+    soil_db_path = get_db_path('soil')
+    soil_db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Check if Soil database exists and is initialized
+    soil_needs_init = False
+    if not soil_db_path.exists():
+        soil_needs_init = True
+    else:
+        # Check if schema table exists
+        conn = sqlite3.connect(str(soil_db_path))
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='_schema_metadata'"
+        )
+        if not cursor.fetchone():
+            soil_needs_init = True
+        conn.close()
+
+    if soil_needs_init:
+        with get_soil() as soil:
+            soil.init_schema()
+
+    # Clean all items from previous test runs
+    with get_soil() as soil:
+        soil._get_connection().execute("DELETE FROM item")
+        soil._get_connection().commit()
+
     core = get_core()
 
     # Clean all entities from previous test runs
