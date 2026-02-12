@@ -2,21 +2,26 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://schemas.memogarden.net/items/message.schema.json",
   "title": "Message",
-  "description": "Chat message or communication event. Extends Note with participant and channel information.",
+  "description": "Chat message or communication event. Extends Note with participant and channel information. For Project Studio, messages contain fragments array for semantic reference tracking.",
   "allOf": [
-    {
-      "$ref": "note.schema.json"
-    },
+    {"$ref": "note.schema.json"},
     {
       "type": "object",
       "properties": {
+        "_type": {
+          "const": "Message"
+        },
         "sender": {
           "type": "string",
           "description": "Name or identifier of the message sender",
           "examples": ["Alice", "user@example.com", "+1234567890"]
         },
+        "recipient": {
+          "type": ["string", "null"],
+          "description": "Optional recipient identifier"
+        },
         "channel": {
-          "type": "string",
+          "type": ["string", "null"],
           "description": "Channel or conversation identifier",
           "examples": ["#general", "direct-message", "support-ticket-123"]
         },
@@ -25,12 +30,25 @@
           "description": "Type of message",
           "enum": ["text", "image", "file", "system", "emoji"]
         },
-        "in_reply_to_message": {
+        "in_reply_to": {
           "type": ["string", "null"],
+          "pattern": "^soil_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{12}-[0-9a-f]{4}-[0-9a-f]{12}$",
           "description": "UUID of message being replied to (for threaded conversations)"
-        }
-      },
-      "required": ["sender", "channel", "message_type"]
+        },
+        "subject": {
+          "type": ["string", "null"],
+          "description": "Optional message subject (or reuse title)"
+        },
+        "fragments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Fragment IDs contained in this message (e.g., '^abc', 'def')"
+        },
+        "required": ["sender"]
+      }
     }
-  ]
+  ],
+  "required": ["sender", "fragments"]
 }

@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.memogarden.net/entities/conversationlog.schema.json",
+  "title": "ConversationLog",
+  "description": "Branch-able conversation thread with linear message sequence. Stores items (Messages, ToolCalls, etc.) in order, supports forking at any point. When collapsed, contains summary of key decision. RFC-003 v4 context frames (fork/rejoin) map to conversation branches.",
+  "allOf": [
+    {"$ref": "entity.schema.json"},
+    {
+      "type": "object",
+      "properties": {
+        "_type": {"const": "ConversationLog"},
+        "data": {
+          "type": "object",
+          "properties": {
+            "parent_uuid": {
+              "type": ["string", "null"],
+              "description": "UUID of parent ConversationLog (branch point). NULL for root conversations."
+            },
+            "items": {
+              "type": "array",
+              "items": {"type": "string"},
+              "description": "Ordered list of Item UUIDs (Messages, ToolCalls, Actions, etc.) comprising the conversation thread."
+            },
+            "summary": {
+              "type": ["object", "null"],
+              "description": "Present only when collapsed. Contains decision summary with content, author (operator/agent/system), timestamp, and optional fragment_ids referenced in decision."
+            },
+            "created_at": {
+              "type": "string",
+              "format": "date-time",
+              "description": "ISO 8601 timestamp when ConversationLog was created."
+            },
+            "updated_at": {
+              "type": "string",
+              "format": "date-time",
+              "description": "ISO 8601 timestamp of last update to this ConversationLog."
+            },
+            "collapsed": {
+              "type": "boolean",
+              "description": "True if this branch has been collapsed (no further items should be added)."
+            }
+          },
+          "required": ["items", "parent_uuid"]
+        }
+      }
+    }
+  ],
+  "required": ["parent_uuid", "items"]
+}

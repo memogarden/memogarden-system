@@ -4,6 +4,7 @@
 --
 -- DESIGN:
 -- - entity: Global registry with JSON data field
+--   - Entity types: Artifact, ContextFrame, ConversationLog, Label, Scope, Transaction, User, View, ViewMerge
 -- - user_relation: Engagement signals with time horizon
 -- - context_frame: Attention tracking (LRU containers)
 -- - Type-specific schemas in /schemas/types/entities/*.schema.json
