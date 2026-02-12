@@ -42,7 +42,7 @@ except ImportError:
 # ============================================================================
 
 VALID_LAYERS = {"soil", "core"}
-VALID_CATEGORIES = {"items", "entities"}
+VALID_CATEGORIES = {"facts", "entities"}
 
 # Schema file paths (relative to package root)
 SQL_SCHEMA_PATHS = {
@@ -51,7 +51,7 @@ SQL_SCHEMA_PATHS = {
 }
 
 TYPE_SCHEMA_DIR = {
-    "items": "system/schemas/types/items",
+    "facts": "system/schemas/types/facts",
     "entities": "system/schemas/types/entities",
 }
 
@@ -117,10 +117,10 @@ def get_sql_schema(layer: str) -> str:
 # ============================================================================
 
 def get_type_schema(category: str, type_name: str) -> dict:
-    """Get JSON schema for a specific Item or Entity type.
+    """Get JSON schema for a specific Fact or Entity type.
 
     Args:
-        category: Schema category - 'items' or 'entities'
+        category: Schema category - 'facts' or 'entities'
         type_name: Type name (e.g., 'Email', 'Note', 'Transaction', 'Label')
 
     Returns:
@@ -131,7 +131,7 @@ def get_type_schema(category: str, type_name: str) -> dict:
         FileNotFoundError: If schema file not found
 
     Examples:
-        >>> email_schema = get_type_schema('items', 'Email')
+        >>> email_schema = get_type_schema('facts', 'Email')
         >>> transaction_schema = get_type_schema('entities', 'Transaction')
     """
     if category not in VALID_CATEGORIES:
@@ -184,7 +184,7 @@ def list_type_schemas(category: str) -> list[str]:
     """List available type schemas in a category.
 
     Args:
-        category: Schema category - 'items' or 'entities'
+        category: Schema category - 'facts' or 'entities'
 
     Returns:
         List of type names (e.g., ['Email', 'Note', 'Message', 'Action', 'ActionResult'])
@@ -194,7 +194,7 @@ def list_type_schemas(category: str) -> list[str]:
         FileNotFoundError: If schema directory not found
 
     Examples:
-        >>> item_types = list_type_schemas('items')
+        >>> fact_types = list_type_schemas('facts')
         >>> entity_types = list_type_schemas('entities')
     """
     if category not in VALID_CATEGORIES:

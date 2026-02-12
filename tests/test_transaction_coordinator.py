@@ -168,9 +168,9 @@ class TestConsistencyCheck:
 
         # Create an orphaned EntityDelta in Soil
         with get_soil(soil_path) as soil:
-            from system.soil.item import Item
+            from system.soil.fact import Fact
 
-            orphaned_delta = Item(
+            orphaned_delta = Fact(
                 uuid="soil_test_orphan",
                 _type="EntityDelta",
                 realized_at="2026-02-09T12:00:00Z",
@@ -180,7 +180,7 @@ class TestConsistencyCheck:
                     "changes": {"amount": 100},
                 }
             )
-            soil.create_item(orphaned_delta)
+            soil.create_fact(orphaned_delta)
 
         # Should detect orphaned delta
         orphans = coordinator._find_orphaned_deltas()
@@ -241,8 +241,8 @@ class TestCrossDatabaseTransaction:
                 entity_uuid = core.entity.create("transactions")
 
                 # Create item in Soil
-                from system.soil.item import Item
-                item = Item(
+                from system.soil.fact import Fact
+                item = Fact(
                     uuid="soil_test_item",
                     _type="Note",
                     realized_at="2026-02-09T12:00:00Z",
@@ -259,7 +259,7 @@ class TestCrossDatabaseTransaction:
 
         # Both should be committed
         with get_soil(soil_path) as s:
-            retrieved = s.get_item("soil_test_item")
+            retrieved = s.get_fact("soil_test_item")
             assert retrieved is not None
             assert retrieved._type == "Note"
 
@@ -280,7 +280,7 @@ class TestCrossDatabaseTransaction:
         """Exception in cross-DB transaction rolls back both databases."""
         coordinator, soil_path, core_path = coordinator_with_dbs
 
-        from system.soil.item import Item
+        from system.soil.fact import Fact
 
         # Create an entity before transaction
         import os
@@ -299,7 +299,7 @@ class TestCrossDatabaseTransaction:
         with pytest.raises(RuntimeError, match="Test exception"):
             with coordinator.cross_database_transaction() as (soil, core):
                 # Create item in Soil
-                item = Item(
+                item = Fact(
                     uuid="soil_test_rollback",
                     _type="Note",
                     realized_at="2026-02-09T12:00:00Z",
@@ -311,9 +311,9 @@ class TestCrossDatabaseTransaction:
                 # Raise exception
                 raise RuntimeError("Test exception")
 
-        # Item should not exist (rolled back)
+        # Fact should not exist (rolled back)
         with get_soil(soil_path) as s:
-            retrieved = s.get_item("soil_test_rollback")
+            retrieved = s.get_fact("soil_test_rollback")
             assert retrieved is None
 
     def test_cross_database_transaction_context_manager_protocol(self, coordinator_with_dbs):
@@ -373,8 +373,8 @@ class TestCommitOrdering:
             with coordinator.cross_database_transaction() as (soil, core):
                 entity_uuid = core.entity.create("transactions")
 
-                from system.soil.item import Item
-                item = Item(
+                from system.soil.fact import Fact
+                item = Fact(
                     uuid="soil_test_commit_order",
                     _type="Note",
                     realized_at="2026-02-09T12:00:00Z",
@@ -391,7 +391,7 @@ class TestCommitOrdering:
 
         # Verify both were committed
         with get_soil(soil_path) as s:
-            retrieved = s.get_item("soil_test_commit_order")
+            retrieved = s.get_fact("soil_test_commit_order")
             assert retrieved is not None
 
 

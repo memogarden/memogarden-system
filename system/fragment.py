@@ -15,12 +15,15 @@ class NotImplementedError(Exception):
 
 
 class ReferenceType:
-    """Types of semantic references in Messages."""
+    """Types of semantic references in Messages.
+
+    Per PRD v0.11.0: Object = Fact | Entity. A UUID reference can point to either
+    layer's object, so we use 'object' rather than 'item' or 'entity'."""
 
     FRAGMENT = "fragment"
     ARTIFACT_LINE = "artifact_line"
     ARTIFACT_LINE_AT_COMMIT = "artifact_line_at_commit"
-    ITEM = "item"
+    OBJECT = "object"  # UUID reference to any Fact or Entity (was 'item')
     LOG = "log"
 
 
@@ -113,8 +116,8 @@ def parse_references(content: str) -> List[Reference]:
     # Group 3: @hex (optional commit hash, 4+ characters)
     artifact_line_pattern = re.compile(r'([\w_]+):(\d+)(?:@([0-9a-f]{4,})\b)?')
 
-    # Pattern for item refs: @<uuid>
-    item_pattern = re.compile(r'@((?:soil|core)_[\w-]+)')
+    # Pattern for object refs: @<uuid> (Fact or Entity)
+    object_pattern = re.compile(r'@((?:soil|core)_[\w-]+)')
 
     # Pattern for log refs: [<text>](uuid)
     log_pattern = re.compile(r'\[([^\]]+)\]\(((?:soil|core)_[\w-]+)\)')
@@ -132,8 +135,8 @@ def parse_references(content: str) -> List[Reference]:
             ref_type_str = ReferenceType.ARTIFACT_LINE
         references.append(Reference(ref_type_str, (match.start(), match.end()), match.group()))
 
-    for match in item_pattern.finditer(content):
-        ref_type = ReferenceType.ITEM
+    for match in object_pattern.finditer(content):
+        ref_type = ReferenceType.OBJECT
         # Extract just the UUID without @ prefix (group 1)
         references.append(Reference(ref_type, (match.start(), match.end()), match.group(1)))
 

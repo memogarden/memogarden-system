@@ -1,4 +1,4 @@
-"""Item dataclasses for MemoGarden Soil."""
+"""Fact dataclasses for MemoGarden Soil."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ class Evidence:
     """Provenance information for relations."""
     source: str  # 'soil_stated' | 'user_stated' | 'agent_inferred' | 'system_inferred'
     confidence: float | None = None  # 0.0-1.0, for inferred only
-    basis: list[str] | None = None  # UUIDs of supporting items/entities
+    basis: list[str] | None = None  # UUIDs of supporting facts/entities
     method: str | None = None  # For inferred: 'nlp_extraction' | 'pattern_match' | etc.
 
     def to_dict(self) -> dict:
@@ -37,8 +37,8 @@ class Evidence:
 
 
 @dataclass
-class Item:
-    """Base Item class (immutable fact in Soil)."""
+class Fact:
+    """Base Fact class (immutable fact in Soil)."""
     uuid: str
     _type: str  # 'Note' | 'Message' | 'Email' | 'ToolCall' | 'EntityDelta' | 'SystemEvent'
     realized_at: str  # ISO 8601

@@ -98,13 +98,13 @@ class TestReferenceParsing:
         assert refs[0].target == "README:15@abc123"
 
     def test_parse_item_reference(self):
-        """Parse Item reference @uuid."""
+        """Parse Fact reference @uuid."""
         content = "See @soil_abc123def for context."
 
         refs = parse_references(content)
 
         assert len(refs) == 1
-        assert refs[0].type == ReferenceType.ITEM
+        assert refs[0].type == ReferenceType.OBJECT
         assert refs[0].target == "soil_abc123def"
 
     def test_parse_log_reference(self):
@@ -129,7 +129,7 @@ class TestReferenceParsing:
         types = {ref.type for ref in refs}
         assert ReferenceType.FRAGMENT in types
         assert ReferenceType.ARTIFACT_LINE in types
-        assert ReferenceType.ITEM in types
+        assert ReferenceType.OBJECT in types
 
     def test_references_with_overlapping_positions(self):
         """Parse references with different positions."""

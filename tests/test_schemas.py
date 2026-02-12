@@ -63,8 +63,8 @@ class TestGetTypeSchema:
     """Tests for get_type_schema function."""
 
     def test_get_email_item_schema(self):
-        """get_type_schema('items', 'Email') returns Email schema."""
-        schema = get_type_schema('items', 'Email')
+        """get_type_schema('facts', 'Email') returns Email schema."""
+        schema = get_type_schema('facts', 'Email')
 
         assert isinstance(schema, dict)
         assert schema['title'] == 'Email'
@@ -87,8 +87,8 @@ class TestGetTypeSchema:
             assert len(schema['allOf']) >= 1
 
     def test_get_note_item_schema(self):
-        """get_type_schema('items', 'Note') returns Note schema."""
-        schema = get_type_schema('items', 'Note')
+        """get_type_schema('facts', 'Note') returns Note schema."""
+        schema = get_type_schema('facts', 'Note')
 
         assert isinstance(schema, dict)
         assert schema['title'] == 'Note'
@@ -106,19 +106,19 @@ class TestGetTypeSchema:
     def test_nonexistent_type_raises_file_not_found(self):
         """get_type_schema with nonexistent type raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError, match="Type schema file not found"):
-            get_type_schema('items', 'NonexistentType')
+            get_type_schema('facts', 'NonexistentType')
 
     def test_type_name_case_insensitive(self):
         """get_type_schema handles case variations correctly."""
         # File name is lowercase (email.schema.json)
         # Our implementation normalizes type names, but let's verify
         # it works with the standard capitalized form
-        schema = get_type_schema('items', 'Email')
+        schema = get_type_schema('facts', 'Email')
         assert schema['title'] == 'Email'
 
     def test_action_result_schema(self):
         """get_type_schema returns ActionResult schema (Session 6.6 structured error)."""
-        schema = get_type_schema('items', 'ActionResult')
+        schema = get_type_schema('facts', 'ActionResult')
 
         assert isinstance(schema, dict)
         assert schema['title'] == 'ActionResult'
@@ -130,8 +130,8 @@ class TestListTypeSchemas:
     """Tests for list_type_schemas function."""
 
     def test_list_item_schemas(self):
-        """list_type_schemas('items') returns list of Item types."""
-        types = list_type_schemas('items')
+        """list_type_schemas('facts') returns list of Fact types."""
+        types = list_type_schemas('facts')
 
         assert isinstance(types, list)
         assert len(types) > 0
@@ -159,11 +159,11 @@ class TestListTypeSchemas:
             list_type_schemas('invalid')
 
         with pytest.raises(ValueError, match="Invalid category"):
-            list_type_schemas('item')  # Should be 'items'
+            list_type_schemas('item')  # Should be 'facts'
 
     def test_listed_types_can_be_retrieved(self):
         """All types returned by list_type_schemas can be retrieved."""
-        for category in ['items', 'entities']:
+        for category in ['facts', 'entities']:
             types = list_type_schemas(category)
             for type_name in types[:3]:  # Test first 3 to avoid excessive test time
                 schema = get_type_schema(category, type_name)
@@ -172,7 +172,7 @@ class TestListTypeSchemas:
 
     def test_returns_sorted_list(self):
         """list_type_schemas returns alphabetically sorted list."""
-        types = list_type_schemas('items')
+        types = list_type_schemas('facts')
 
         # Check if sorted
         assert types == sorted(types)
@@ -200,7 +200,7 @@ class TestRfc004Invariants:
         # We can't test a truly missing schema since all are present
         # But we can verify the error type for invalid lookup
         with pytest.raises(FileNotFoundError):
-            get_type_schema('items', 'DefinitelyNotARealType12345')
+            get_type_schema('facts', 'DefinitelyNotARealType12345')
 
     def test_schema_content_consistency(self):
         """Schema content is consistent across access methods."""

@@ -7,12 +7,12 @@ import sqlite3
 from datetime import UTC
 from pathlib import Path
 
-from .item import SOIL_UUID_PREFIX, Evidence, Item, current_day, generate_soil_uuid
+from .fact import SOIL_UUID_PREFIX, Evidence, Fact, current_day, generate_soil_uuid
 from .relation import SystemRelation
 
 
 class Soil:
-    """Soil database for immutable Items and System Relations.
+    """Soil database for immutable Facts and System Relations.
 
     CONNECTION LIFECYCLE (Session 6.5 Refactor):
     - Soil MUST be used as context manager (enforced at runtime)
@@ -145,18 +145,18 @@ class Soil:
     # ITEM OPERATIONS
     # ==========================================================================
 
-    def create_item(self, item: Item) -> str:
-        """Create a new Item in Soil.
+    def create_fact(self, fact: Fact) -> str:
+        """Create a new Fact in Soil.
 
         Args:
-            item: Item to create
+            fact: Fact to create
 
         Returns:
-            UUID of created Item
+            UUID of created Fact
         """
         # Compute hash if not provided
-        if item.integrity_hash is None:
-            item.integrity_hash = item.compute_hash()
+        if fact.integrity_hash is None:
+            fact.integrity_hash = fact.compute_hash()
 
         conn = self._get_connection()
         conn.execute(
@@ -164,28 +164,28 @@ class Soil:
                               fidelity, superseded_by, superseded_at, data, metadata)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                item.uuid,
-                item._type,
-                item.realized_at,
-                item.canonical_at,
-                item.integrity_hash,
-                item.fidelity,
-                item.superseded_by,
-                item.superseded_at,
-                json.dumps(item.data),
-                json.dumps(item.metadata) if item.metadata else None,
+                fact.uuid,
+                fact._type,
+                fact.realized_at,
+                fact.canonical_at,
+                fact.integrity_hash,
+                fact.fidelity,
+                fact.superseded_by,
+                fact.superseded_at,
+                json.dumps(fact.data),
+                json.dumps(fact.metadata) if fact.metadata else None,
             )
         )
-        return item.uuid
+        return fact.uuid
 
-    def get_item(self, uuid: str) -> Item | None:
-        """Get Item by UUID.
+    def get_fact(self, uuid: str) -> Fact | None:
+        """Get Fact by UUID.
 
         Args:
-            uuid: Item UUID (with or without "soil_" prefix)
+            uuid: Fact UUID (with or without "soil_" prefix)
 
         Returns:
-            Item if found, None otherwise
+            Fact if found, None otherwise
         """
         # Ensure prefix
         if not uuid.startswith(SOIL_UUID_PREFIX):
@@ -199,7 +199,7 @@ class Soil:
         if row is None:
             return None
 
-        return Item(
+        return Fact(
             uuid=row["uuid"],
             _type=row["_type"],
             realized_at=row["realized_at"],
@@ -213,18 +213,18 @@ class Soil:
         )
 
     def mark_superseded(self, original_uuid: str, superseded_by_uuid: str, superseded_at: str) -> bool:
-        """Mark an Item as superseded by another Item.
+        """Mark a Fact as superseded by another Fact.
 
-        Updates the original Item's superseded_by and superseded_at fields
+        Updates the original Fact's superseded_by and superseded_at fields
         to indicate it has been replaced by a new version.
 
         Args:
-            original_uuid: UUID of the Item being superseded
-            superseded_by_uuid: UUID of the new Item that supersedes it
+            original_uuid: UUID of the Fact being superseded
+            superseded_by_uuid: UUID of the new Fact that supersedes it
             superseded_at: ISO 8601 timestamp when supersession occurred
 
         Returns:
-            True if Item was found and updated, False if not found
+            True if Fact was found and updated, False if not found
         """
         # Ensure UUIDs have prefix
         if not original_uuid.startswith(SOIL_UUID_PREFIX):
@@ -241,14 +241,14 @@ class Soil:
         )
         return cursor.rowcount > 0
 
-    def find_item_by_rfc_message_id(self, message_id: str) -> Item | None:
-        """Find Email item by RFC Message-ID.
+    def find_item_by_rfc_message_id(self, message_id: str) -> Fact | None:
+        """Find Email fact by RFC Message-ID.
 
         Args:
             message_id: RFC 822 Message-ID header value
 
         Returns:
-            Email Item if found, None otherwise
+            Email Fact if found, None otherwise
         """
         cursor = self._get_connection().execute(
             """SELECT * FROM item
@@ -261,7 +261,7 @@ class Soil:
         if row is None:
             return None
 
-        return Item(
+        return Fact(
             uuid=row["uuid"],
             _type=row["_type"],
             realized_at=row["realized_at"],
@@ -274,15 +274,15 @@ class Soil:
             metadata=json.loads(row["metadata"]) if row["metadata"] else None,
         )
 
-    def list_items(self, _type: str | None = None, limit: int = 100) -> list[Item]:
-        """List Items, optionally filtered by type.
+    def list_items(self, _type: str | None = None, limit: int = 100) -> list[Fact]:
+        """List Facts, optionally filtered by type.
 
         Args:
-            _type: Filter by Item type (e.g., 'Email', 'Note')
-            limit: Maximum number of Items to return
+            _type: Filter by Fact type (e.g., 'Email', 'Note')
+            limit: Maximum number of Facts to return
 
         Returns:
-            List of Items
+            List of Facts
         """
         if _type:
             cursor = self._get_connection().execute(
@@ -297,7 +297,7 @@ class Soil:
 
         items = []
         for row in cursor.fetchall():
-            items.append(Item(
+            items.append(Fact(
                 uuid=row["uuid"],
                 _type=row["_type"],
                 realized_at=row["realized_at"],
@@ -328,7 +328,7 @@ class Soil:
             limit: Maximum results to return
 
         Returns:
-            List of matching item rows (raw database rows, not Item objects)
+            List of matching fact rows (raw database rows, not Fact objects)
 
         Note:
             Results ordered by realized_at DESC (most recent first)
@@ -431,14 +431,14 @@ class Soil:
         """Create a 'replies_to' system relation for email threading.
 
         Args:
-            reply_uuid: UUID of reply Item
-            parent_uuid: UUID of parent Item being replied to
+            reply_uuid: UUID of reply Fact
+            parent_uuid: UUID of parent Fact being replied to
             evidence: Optional provenance information
 
         Returns:
             UUID of created relation, or None if parent not found
         """
-        parent = self.get_item(parent_uuid)
+        parent = self.get_fact(parent_uuid)
         if parent is None:
             return None
 
@@ -496,13 +496,13 @@ class Soil:
     # ==========================================================================
 
     def count_items(self, _type: str | None = None) -> int:
-        """Count Items.
+        """Count Facts.
 
         Args:
-            _type: Filter by Item type
+            _type: Filter by Fact type
 
         Returns:
-            Count of Items
+            Count of Facts
         """
         if _type:
             cursor = self._get_connection().execute(
@@ -579,8 +579,8 @@ def get_soil(db_path: str | Path | None = None, init: bool = False) -> Soil:
     return soil
 
 
-def create_email_item(**kwargs) -> Item:
-    """Create an Email Item from keyword arguments.
+def create_email_item(**kwargs) -> Fact:
+    """Create an Email Fact from keyword arguments.
 
     Accepts structured dict with _type, data, metadata.
     Example:
@@ -594,17 +594,17 @@ def create_email_item(**kwargs) -> Item:
         )
 
     Args:
-        **kwargs: Email item fields
+        **kwargs: Email fact fields
 
     Returns:
-        Email Item
+        Email Fact
     """
     from datetime import datetime
 
     # Extract data fields
     data = kwargs.get("data", {})
 
-    return Item(
+    return Fact(
         uuid=generate_soil_uuid(),
         _type=kwargs.get("_type", "Email"),
         realized_at=kwargs.get("realized_at", datetime.now(UTC).isoformat()),
