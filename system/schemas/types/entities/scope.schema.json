@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.memogarden.net/entities/scope.schema.json",
+  "title": "Scope",
+  "description": "First-class work container with context tracking (RFC-003, RFC-009). Scopes organize work and own ContextFrames for attention tracking.",
+  "allOf": [
+    {
+      "$ref": "entity.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "_type": {
+          "const": "Scope"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string",
+              "description": "Human-readable name for this scope",
+              "examples": ["Q1 Planning", "Budget Review", "Research Project"]
+            },
+            "active_participants": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "UUIDs of operator/agents currently active in this scope",
+              "uniqueItems": true
+            },
+            "artifact_uuids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "UUIDs of artifacts belonging to this scope (unordered, for enumeration only)",
+              "uniqueItems": true
+            }
+          },
+          "required": ["label"],
+          "anyOf": [
+            {"required": ["active_participants"]},
+            {"required": ["artifact_uuids"]}
+          ]
+        }
+      }
+    }
+  ]
+}
