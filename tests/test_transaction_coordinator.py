@@ -249,7 +249,7 @@ class TestCrossDatabaseTransaction:
                     canonical_at="2026-02-09T12:00:00Z",
                     data={"content": "test"},
                 )
-                soil.create_item(item)
+                soil.create_fact(item)
 
         finally:
             if old_env is not None:
@@ -306,7 +306,7 @@ class TestCrossDatabaseTransaction:
                     canonical_at="2026-02-09T12:00:00Z",
                     data={"content": "test"},
                 )
-                soil.create_item(item)
+                soil.create_fact(item)
 
                 # Raise exception
                 raise RuntimeError("Test exception")
@@ -381,7 +381,7 @@ class TestCommitOrdering:
                     canonical_at="2026-02-09T12:00:00Z",
                     data={"content": "test"},
                 )
-                soil.create_item(item)
+                soil.create_fact(item)
 
         finally:
             if old_env is not None:
