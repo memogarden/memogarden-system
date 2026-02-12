@@ -72,7 +72,7 @@ class EntityOperations:
         entity_type: str,
         group_id: str | None = None,
         derived_from: str | None = None,
-        data: str | None = None
+        data: dict | str | None = None
     ) -> str:
         """Create entity in global registry with auto-generated UUID and hash.
 
@@ -80,7 +80,8 @@ class EntityOperations:
             entity_type: The type of entity (e.g., 'Transaction', 'Recurrence')
             group_id: Optional group ID for clustering related entities
             derived_from: Optional ID of source entity for provenance tracking
-            data: Optional JSON data for type-specific fields (defaults to empty JSON object)
+            data: Optional JSON data for type-specific fields (dict or JSON string,
+                   defaults to empty JSON object). Converted to JSON string for storage.
 
         Returns:
             The auto-generated entity UUID (plain UUID, no prefix)
@@ -96,9 +97,13 @@ class EntityOperations:
             entity_uuid = uid.generate_uuid()
             now = isodatetime.now()
 
-            # Use empty JSON object if data not provided
+            # Convert data to JSON string for storage
             if data is None:
-                data = json.dumps({})
+                data_json = json.dumps({})
+            elif isinstance(data, dict):
+                data_json = json.dumps(data)
+            else:
+                data_json = data
 
             # Compute initial hash (previous_hash is NULL for initial entities)
             initial_hash = hash_chain.compute_entity_hash(
@@ -114,7 +119,7 @@ class EntityOperations:
                 self._conn.execute(
                     """INSERT INTO entity (uuid, type, hash, previous_hash, version, group_id, derived_from, created_at, updated_at, data)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (entity_uuid, entity_type, initial_hash, None, 1, group_id, derived_from, now, now, data)
+                    (entity_uuid, entity_type, initial_hash, None, 1, group_id, derived_from, now, now, data_json)
                 )
                 return entity_uuid
             except sqlite3.IntegrityError:
@@ -130,7 +135,7 @@ class EntityOperations:
         entity_id: str,
         table_or_view: str = "entity",
         entity_type: str = "Entity"
-    ) -> sqlite3.Row:
+    ) -> dict:
         """Get entity by UUID, raise ResourceNotFound if not found.
 
         Args:
@@ -139,11 +144,13 @@ class EntityOperations:
             entity_type: Human-readable type name for error messages
 
         Returns:
-            sqlite3.Row with entity data
+            dict with entity data (JSON fields parsed to Python native types)
 
         Raises:
             ResourceNotFound: If entity_id doesn't exist
         """
+        import json
+
         # Strip prefix if provided
         entity_id = uid.strip_prefix(entity_id)
 
@@ -161,7 +168,14 @@ class EntityOperations:
                 {"entity_id": entity_id}
             )
 
-        return row
+        # Convert sqlite3.Row to dict and parse JSON fields
+        entity = dict(row)
+
+        # Parse JSON data to Python dict
+        if entity.get('data'):
+            entity['data'] = json.loads(entity['data'])
+
+        return entity
 
     def supersede(self, old_id: str, new_id: str) -> None:
         """Mark entity as superseded by another entity.
@@ -344,7 +358,7 @@ class EntityOperations:
         include_superseded: bool = False,
         limit: int = 100,
         offset: int = 0,
-    ) -> tuple[list[sqlite3.Row], int]:
+    ) -> tuple[list[dict], int]:
         """Query entities with filters.
 
         Args:
@@ -354,8 +368,10 @@ class EntityOperations:
             offset: Number of results to skip
 
         Returns:
-            Tuple of (list of entity rows, total count)
+            Tuple of (list of entity dicts with parsed JSON, total count)
         """
+        import json
+
         # Build WHERE clause
         where_parts = []
         params = []
@@ -383,19 +399,27 @@ class EntityOperations:
         # Execute query
         rows = self._conn.execute(query, params).fetchall()
 
+        # Convert rows to dicts and parse JSON data
+        entities = []
+        for row in rows:
+            entity = dict(row)
+            if entity.get('data'):
+                entity['data'] = json.loads(entity['data'])
+            entities.append(entity)
+
         # Get total count
         count_query = f"SELECT COUNT(*) as total FROM entity WHERE {where_clause}"
         total_row = self._conn.execute(count_query, params[:-2]).fetchone()
         total = total_row["total"]
 
-        return rows, total
+        return entities, total
 
     def search(
         self,
         query: str,
         coverage: str = "content",
         limit: int = 20
-    ) -> list[sqlite3.Row]:
+    ) -> list[dict]:
         """Search entities by fuzzy text matching.
 
         Session 9: Public API for entity search.
@@ -407,12 +431,14 @@ class EntityOperations:
             limit: Maximum results to return
 
         Returns:
-            List of matching entity rows
+            List of matching entity dicts with parsed JSON data
 
         Note:
             Only returns active entities (superseded_by IS NULL)
             Results ordered by updated_at DESC (most recent first)
         """
+        import json
+
         # Build search pattern with wildcards
         search_pattern = f"%{query}%"
 
@@ -445,9 +471,16 @@ class EntityOperations:
         """
         params.append(limit)
 
-        # Execute query
-        cursor = self._conn.execute(sql, params)
-        return cursor.fetchall()
+        # Execute query and convert to dicts with parsed JSON
+        rows = self._conn.execute(sql, params).fetchall()
+        entities = []
+        for row in rows:
+            entity = dict(row)
+            if entity.get('data'):
+                entity['data'] = json.loads(entity['data'])
+            entities.append(entity)
+
+        return entities
 
     def exists(self, entity_id: str) -> bool:
         """Check if an entity exists.

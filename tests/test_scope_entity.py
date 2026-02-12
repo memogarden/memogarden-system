@@ -177,10 +177,13 @@ class TestScopeEntityOperations:
             offset=2
         )
 
-        # Should return scopes 2 and 3 (0-indexed)
+        # Query uses ORDER BY created_at DESC (newest first)
+        # Created order: 0, 1, 2, 3, 4
+        # DESC order: 4, 3, 2, 1, 0
+        # offset=2 skips 4, 3 and returns: 2, 1
         assert len(results) == 2
         assert 'scope 2' in results[0]['data']['label']
-        assert 'scope 3' in results[1]['data']['label']
+        assert 'scope 1' in results[1]['data']['label']
 
     def test_supersede_scope(self, db_core):
         """Supersede old Scope with new Scope."""
