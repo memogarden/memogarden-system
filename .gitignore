@@ -24,7 +24,7 @@ share/python-wheels/
 MANIFEST
 
 # Poetry
-poetry.lock
+# poetry.lock  # Committed for reproducible builds
 
 # Testing
 .pytest_cache/
