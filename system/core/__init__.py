@@ -55,6 +55,7 @@ if TYPE_CHECKING:
     from .transaction import TransactionOperations
     from .context import ContextOperations
     from .artifact import ArtifactOperations
+    from .conversation import ConversationOperations
 
 
 class Core:
@@ -88,6 +89,7 @@ class Core:
         self._relation_ops = None
         self._context_ops = None
         self._artifact_ops = None
+        self._conversation_ops = None
 
     @property
     def entity(self) -> "EntityOperations":
@@ -174,6 +176,21 @@ class Core:
             from .artifact import ArtifactOperations
             self._artifact_ops = ArtifactOperations(self)
         return self._artifact_ops
+
+    @property
+    def conversation(self) -> "ConversationOperations":
+        """Conversation operations for Project Studio.
+
+        Lazy-loaded to avoid circular import issues.
+        Operations are created on first access and cached.
+
+        Note: Passes self (Core) to ConversationOperations so it can
+        coordinate entity registry operations automatically.
+        """
+        if self._conversation_ops is None:
+            from .conversation import ConversationOperations
+            self._conversation_ops = ConversationOperations(self)
+        return self._conversation_ops
 
     def has_admin_user(self) -> bool:
         """Check if any admin users exist in the database.
