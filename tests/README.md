@@ -49,28 +49,51 @@ tests/
 
 ### ⚠️ Standard Test Execution (MUST follow)
 
-**IMPORTANT:** Always run tests from the `memogarden-system` directory to ensure pytest uses the correct configuration from `pyproject.toml`.
+**IMPORTANT:** Always use the standardized `run_tests.sh` script for test execution. This ensures consistent behavior across environments and provides grep-able output for automation.
 
 ```bash
-# From project root, change to system directory first
-cd memogarden-system
+# From project root
+./memogarden-system/run_tests.sh
 
-# Then run pytest
-poetry run pytest
+# Or change to system directory first
+cd memogarden-system && ./run_tests.sh
 ```
 
 **Standard Commands:**
 
 | Task | Command |
 |------|---------|
-| Run all tests | `poetry run pytest` |
-| Run with verbose output | `poetry run pytest -xvs` |
-| Run specific test file | `poetry run pytest tests/test_core.py` |
-| Run specific test | `poetry run pytest tests/test_core.py::test_entity_create -xvs` |
-| Run with coverage | `poetry run pytest --cov=system --cov-report=html` |
-| Stop on first failure | `poetry run pytest -x` |
+| Run all tests | `./run_tests.sh` |
+| Run with verbose output | `./run_tests.sh -xvs` |
+| Run specific test file | `./run_tests.sh tests/test_core.py` |
+| Run specific test | `./run_tests.sh tests/test_core.py::test_entity_create -xvs` |
+| Run with coverage | `./run_tests.sh --cov=system --cov-report=html` |
+| Stop on first failure | `./run_tests.sh -x` |
+| Get summary only (for agents) | `./run_tests.sh --tb=no -q 2>&1 | tail -n 7` |
 
-**Why this matters:** Running from the root directory or without `poetry run` can cause import errors. The `memogarden-system/pyproject.toml` configures test discovery correctly.
+**Why use run_tests.sh:**
+- Ensures correct Poetry environment is used
+- Works from any directory (changes to project dir automatically)
+- Provides grep-able output with test run ID and summary
+- Last 7 lines always contain summary (use `tail -n 7` for quick status check)
+
+**For quick status check (agents):**
+```bash
+# Get just the summary (7 lines) without full test output
+./run_tests.sh --tb=no -q 2>&1 | tail -n 7
+```
+
+**Example output summary:**
+```
+╔═══════════════════════════════════════════════════════════╗
+║  Test Summary                                               ║
+╠═══════════════════════════════════════════════════════════╣
+║  Status: PASSED                                            ║
+║  Tests: 165 passed                                      ║
+║  Duration: 8.14s                                        ║
+║  Test Run ID: 20260213-064712                                  ║
+╚═══════════════════════════════════════════════════════════╝
+```
 
 ## Writing Tests
 
