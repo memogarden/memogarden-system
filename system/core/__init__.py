@@ -46,7 +46,7 @@ import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from system.config import default_settings as settings
+from utils.config import default_settings as settings
 
 if TYPE_CHECKING:
     from .entity import EntityOperations
