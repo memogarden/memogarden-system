@@ -118,3 +118,50 @@ class ConsistencyError(MemoGardenError):
         self.core_error = details.get("core_error") if details else None
         self.orphans = details.get("orphans", []) if details else []
         self.broken_chains = details.get("broken_chains", []) if details else []
+
+
+class ConflictError(MemoGardenError):
+    """Exception raised when an optimistic locking conflict occurs on artifact edits.
+
+    Raised when attempting to commit artifact delta operations with a
+    based_on_hash that doesn't match the artifact's current hash,
+    indicating the artifact was modified by another transaction.
+
+    This is part of the Project Studio artifact delta operations (Session 17).
+
+    Attributes:
+        artifact_uuid: UUID of the artifact that failed the hash check
+        expected_hash: The hash that was expected (based_on_hash provided)
+        actual_hash: The actual current hash of the artifact
+    """
+
+    artifact_uuid: str
+    expected_hash: str
+    actual_hash: str
+
+    def __init__(
+        self,
+        message: str,
+        artifact_uuid: str,
+        expected_hash: str,
+        actual_hash: str,
+    ):
+        """Initialize conflict error.
+
+        Args:
+            message: Human-readable error message
+            artifact_uuid: UUID of the artifact that failed the hash check
+            expected_hash: The hash that was expected (based_on_hash provided)
+            actual_hash: The actual current hash of the artifact
+        """
+        super().__init__(
+            message,
+            details={
+                "artifact_uuid": artifact_uuid,
+                "expected_hash": expected_hash,
+                "actual_hash": actual_hash,
+            },
+        )
+        self.artifact_uuid = artifact_uuid
+        self.expected_hash = expected_hash
+        self.actual_hash = actual_hash

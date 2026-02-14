@@ -15,6 +15,9 @@ from system.soil import Soil, Fact, Evidence, SystemRelation, get_soil, generate
 # Type exports
 from system.core.types import Timestamp, Date
 
+# Exception exports
+from system import exceptions
+
 __all__ = [
     # Core
     "Core",
@@ -30,4 +33,6 @@ __all__ = [
     # Types
     "Timestamp",
     "Date",
+    # Exceptions module (access as system.exceptions.ConflictError, etc.)
+    "exceptions",
 ]
