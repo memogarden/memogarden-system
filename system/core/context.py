@@ -48,7 +48,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from ..exceptions import ResourceNotFound, ValidationError
-from ..utils import isodatetime, uid
+import utils.datetime as isodatetime
+from utils import uid
 
 if TYPE_CHECKING:
     from . import Core

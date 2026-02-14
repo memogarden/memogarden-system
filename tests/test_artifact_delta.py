@@ -12,7 +12,6 @@ import pytest
 
 from system.core import get_core
 from system.core.artifact import (
-    ConflictError,
     DeltaOp,
     DiffResult,
     apply_delta_ops,
@@ -20,6 +19,7 @@ from system.core.artifact import (
     diff_commits,
     parse_delta_ops,
 )
+from system.exceptions import ConflictError
 
 
 # ============================================================================

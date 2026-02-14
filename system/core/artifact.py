@@ -24,16 +24,13 @@ import sqlite3
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from ..exceptions import ResourceNotFound
-from ..utils import hash_chain, isodatetime, uid
+from ..exceptions import ConflictError, ResourceNotFound
+from utils import hash_chain, uid
+import utils.datetime as isodatetime
 from ..soil import get_soil
 
 if TYPE_CHECKING:
     from . import Core
-
-
-class ConflictError(Exception):
-    """Raised when optimistic locking detects conflicting edits."""
 
 
 @dataclass
@@ -325,7 +322,10 @@ class ArtifactOperations:
         if current_hash != based_on_hash:
             raise ConflictError(
                 f"Artifact modified since last read. "
-                f"Expected hash {based_on_hash}, current hash {current_hash}"
+                f"Expected hash {based_on_hash}, current hash {current_hash}",
+                artifact_uuid=artifact_uuid,
+                expected_hash=based_on_hash,
+                actual_hash=current_hash,
             )
 
         # Parse artifact data

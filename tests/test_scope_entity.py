@@ -8,7 +8,7 @@ import pytest
 
 from system.exceptions import ResourceNotFound
 from system.schemas import get_type_schema, list_type_schemas
-from system.utils import uid
+from utils import uid
 
 
 class TestScopeEntityOperations:

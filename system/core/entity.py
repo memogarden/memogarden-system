@@ -28,7 +28,8 @@ CONNECTION LIFECYCLE (Session 6.5 Refactor):
 from typing import TYPE_CHECKING
 
 from ..exceptions import ResourceNotFound
-from ..utils import hash_chain, isodatetime, uid
+from utils import hash_chain, uid
+import utils.datetime as isodatetime
 
 if TYPE_CHECKING:
     from . import Core

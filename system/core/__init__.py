@@ -46,7 +46,7 @@ import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from system.config import default_settings as settings
+from utils.config import default_settings as settings
 
 if TYPE_CHECKING:
     from .entity import EntityOperations
@@ -457,3 +457,84 @@ def init_db():
 
         db.executescript(schema_sql)
         db.commit()
+
+
+# ============================================================================
+# SYSTEM INITIALIZATION (Phase 7: Move DB initialization from API to System)
+# ============================================================================
+
+def init_system() -> dict:
+    """Initialize both Core and Soil databases and run consistency checks.
+
+    This function performs greenfield database initialization for the entire
+    MemoGarden System. It is the public API for application startup.
+
+    Performs:
+    1. Creates databases if they don't exist (RFC-004 path resolution)
+    2. Initializes schemas (applies migrations)
+    3. Runs consistency checks (RFC-008)
+    4. Returns system status
+
+    The system is always-available - startup succeeds even if databases
+    are missing (they will be created automatically).
+
+    Returns:
+        Dict with keys:
+        - 'status': SystemStatus enum value ('normal', 'inconsistent', 'read_only', 'safe_mode')
+        - 'soil_db_path': Path to Soil database
+        - 'core_db_path': Path to Core database
+        - 'has_admin_user': True if admin user exists, False otherwise
+        - 'databases_existed': True if databases existed before this call
+
+    Raises:
+        Exception: If database initialization fails (prevents app startup)
+    """
+    import os
+    from system.host.environment import get_db_path
+    from system.transaction_coordinator import TransactionCoordinator, SystemStatus
+    from system.soil.database import get_soil
+
+    # Get database paths (RFC-004)
+    soil_db_path = get_db_path('soil')
+    core_db_path = get_db_path('core')
+
+    # Check if databases exist
+    soil_exists = os.path.exists(soil_db_path)
+    core_exists = os.path.exists(core_db_path)
+    databases_existed = soil_exists and core_exists
+
+    if not soil_exists or not core_exists:
+        # Create parent directories if needed
+        soil_dir = os.path.dirname(soil_db_path)
+        core_dir = os.path.dirname(core_db_path)
+        if soil_dir:
+            os.makedirs(soil_dir, exist_ok=True)
+        if core_dir:
+            os.makedirs(core_dir, exist_ok=True)
+
+    # Initialize Core database (creates if missing, applies migrations)
+    init_db()
+
+    # Initialize Soil database (creates if missing, applies migrations)
+    with get_soil(str(soil_db_path)) as soil:
+        soil.init_schema()
+
+    # Run consistency checks (RFC-008)
+    coordinator = TransactionCoordinator(
+        soil_db_path=soil_db_path,
+        core_db_path=core_db_path
+    )
+    system_status = coordinator.check_consistency()
+
+    # Check if admin user exists
+    has_admin = False
+    with get_core() as core:
+        has_admin = core.has_admin_user()
+
+    return {
+        'status': system_status,
+        'soil_db_path': str(soil_db_path),
+        'core_db_path': str(core_db_path),
+        'has_admin_user': has_admin,
+        'databases_existed': databases_existed,
+    }
