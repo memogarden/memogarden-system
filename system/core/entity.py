@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING
 
 from ..exceptions import ResourceNotFound
 from utils import hash_chain, uid
-import utils.datetime as isodatetime
+import utils.isodatetime as isodatetime
 
 if TYPE_CHECKING:
     from . import Core

@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from system.core import get_core, init_db  # noqa: E402
-from utils import datetime as isodatetime  # noqa: E402
+from utils import isodatetime  # noqa: E402
 from system.host.environment import get_env  # noqa: E402
 
 # Get database path from environment

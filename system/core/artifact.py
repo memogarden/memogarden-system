@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Literal
 
 from ..exceptions import ConflictError, ResourceNotFound
 from utils import hash_chain, uid
-import utils.datetime as isodatetime
+import utils.isodatetime as isodatetime
 from ..soil import get_soil
 
 if TYPE_CHECKING:

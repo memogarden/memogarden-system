@@ -6,7 +6,7 @@ the system, ensuring consistency between API, database, and business logic.
 
 from datetime import date, datetime
 
-from utils import datetime as isodatetime
+from utils import isodatetime
 
 
 class Timestamp(str):
