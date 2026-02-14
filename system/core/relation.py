@@ -25,8 +25,8 @@ import sqlite3
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..utils import uid
-from ..utils.time import current_day
+from utils import uid
+from utils.time import current_day
 
 if TYPE_CHECKING:
     from . import Core

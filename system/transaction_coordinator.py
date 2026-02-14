@@ -180,7 +180,7 @@ class TransactionCoordinator:
             True if entity exists, False otherwise
         """
         # Strip prefix (entities stored without prefix)
-        from .utils import uid
+        from utils import uid
         entity_id = uid.strip_prefix(entity_id)
 
         with sqlite3.connect(str(self.core_db_path)) as conn:

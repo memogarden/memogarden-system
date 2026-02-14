@@ -11,7 +11,7 @@ import pytest
 
 from system.core import get_core
 from system.core.entity import EntityOperations
-from system.utils import uid
+from utils import uid
 
 
 # ============================================================================

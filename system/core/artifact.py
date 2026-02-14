@@ -25,7 +25,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from ..exceptions import ConflictError, ResourceNotFound
-from ..utils import hash_chain, isodatetime, uid
+from utils import hash_chain, uid
+import utils.datetime as isodatetime
 from ..soil import get_soil
 
 if TYPE_CHECKING:

@@ -15,7 +15,7 @@ from system.fragment import (
     Fragment,
     NotImplementedError,
 )
-from system.utils import uid
+from utils import uid
 
 
 class TestFragmentGeneration:

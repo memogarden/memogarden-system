@@ -11,7 +11,7 @@ import pytest
 from pathlib import Path
 
 from system.host.environment import resolve_context, get_db_path
-from system.config import Settings, ResourceProfile
+from utils.config import Settings, ResourceProfile
 
 
 # ============================================================================

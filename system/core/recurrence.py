@@ -27,7 +27,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from ..exceptions import ResourceNotFound
-from ..utils import isodatetime, uid
+import utils.datetime as isodatetime
+from utils import uid
 from . import query
 
 if TYPE_CHECKING:
