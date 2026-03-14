@@ -463,7 +463,7 @@ def init_db():
 # SYSTEM INITIALIZATION (Phase 7: Move DB initialization from API to System)
 # ============================================================================
 
-def init_system() -> dict:
+def init_system(verb: str = "run") -> dict:
     """Initialize both Core and Soil databases and run consistency checks.
 
     This function performs greenfield database initialization for the entire
@@ -478,6 +478,10 @@ def init_system() -> dict:
     The system is always-available - startup succeeds even if databases
     are missing (they will be created automatically).
 
+    Args:
+        verb: Deployment verb for path resolution (serve/run/deploy).
+            Defaults to "run" for local development.
+
     Returns:
         Dict with keys:
         - 'status': SystemStatus enum value ('normal', 'inconsistent', 'read_only', 'safe_mode')
@@ -490,13 +494,14 @@ def init_system() -> dict:
         Exception: If database initialization fails (prevents app startup)
     """
     import os
-    from system.host.environment import get_db_path
+    from system.host.environment import resolve_context
     from system.transaction_coordinator import TransactionCoordinator, SystemStatus
     from system.soil.database import get_soil
 
-    # Get database paths (RFC-004)
-    soil_db_path = get_db_path('soil')
-    core_db_path = get_db_path('core')
+    # Get database paths (RFC-004 context resolution)
+    ctx = resolve_context(verb)
+    soil_db_path = ctx.get_db_path('soil')
+    core_db_path = ctx.get_db_path('core')
 
     # Check if databases exist
     soil_exists = os.path.exists(soil_db_path)
