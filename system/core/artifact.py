@@ -318,13 +318,27 @@ class ArtifactOperations:
             raise ValueError(f"Entity {artifact_uuid} is not an Artifact")
 
         # Check optimistic lock (compare first 8 chars of entity hash)
+        # Entity hashes are SHA256 (64 hex chars) - validate for defensive programming
         current_hash = row["hash"]
-        if current_hash[:8] != based_on_hash:
+        if len(current_hash) < 8:
+            # This should never happen with valid entity data
+            raise ValueError(f"Invalid entity hash length: {len(current_hash)} (expected 64)")
+
+        # Validate based_on_hash format (per API schema: 8-char SHA prefix)
+        # However, we accept full hashes and slice to first 8 chars for convenience
+        if len(based_on_hash) < 8:
+            raise ValueError(
+                f"based_on_hash must be at least 8 characters, got {len(based_on_hash)}"
+            )
+
+        # Use first 8 chars for comparison (allows both 8-char prefix and full hash)
+        based_on_prefix = based_on_hash[:8]
+        if current_hash[:8] != based_on_prefix:
             raise ConflictError(
                 f"Artifact modified since last read. "
-                f"Expected hash {based_on_hash}, current hash {current_hash[:8]}",
+                f"Expected hash {based_on_prefix}, current hash {current_hash[:8]}",
                 artifact_uuid=artifact_uuid,
-                expected_hash=based_on_hash,
+                expected_hash=based_on_prefix,
                 actual_hash=current_hash[:8],
             )
 

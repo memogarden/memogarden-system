@@ -277,6 +277,69 @@ class TestArtifactCommitIntegration:
                     based_on_hash=wrong_hash,
                 )
 
+    def test_commit_with_full_hash_prefix_works(self):
+        """Commit with first 8 chars of entity hash succeeds.
+
+        This test verifies the fix for the bug where the backend was comparing
+        the full 64-char entity hash against the 8-char based_on_hash parameter,
+        causing all commits to fail with "modified since last read" errors.
+
+        Per API schema, based_on_hash is "8-char SHA prefix" (min_length=8, max_length=8).
+        However, the backend accepts full hashes and slices to 8 chars for convenience.
+        """
+        with get_core() as core:
+            artifact_uuid = core.entity.create(
+                entity_type="Artifact",
+                data={
+                    "label": "Test Artifact",
+                    "content": "Initial content",
+                    "content_type": "text/plain",
+                }
+            )
+
+            # Get the full entity hash (64 chars for SHA256)
+            full_hash = core.entity.get_current_hash(artifact_uuid)
+
+            # Verify entity hash is 64 characters (SHA256)
+            assert len(full_hash) == 64
+
+            # Commit with only first 8 chars should work
+            hash_prefix = full_hash[:8]
+            result = core.artifact.commit_delta(
+                artifact_uuid=artifact_uuid,
+                ops_string="+1:^xyz",
+                references=["^xyz"],
+                based_on_hash=hash_prefix,  # Only first 8 chars
+            )
+
+            # Verify commit succeeded
+            # The result includes the full previous hash (for traceability)
+            assert result["previous_hash"] == full_hash
+            assert result["previous_hash"][:8] == hash_prefix
+            assert "new_hash" in result
+            assert "delta_uuid" in result
+
+    def test_commit_with_invalid_hash_length_raises_error(self):
+        """Commit with invalid based_on_hash length raises ValueError."""
+        with get_core() as core:
+            artifact_uuid = core.entity.create(
+                entity_type="Artifact",
+                data={
+                    "label": "Test Artifact",
+                    "content": "Initial content",
+                    "content_type": "text/plain",
+                }
+            )
+
+            # Try with too short (less than 8 chars)
+            with pytest.raises(ValueError, match="must be at least 8 characters"):
+                core.artifact.commit_delta(
+                    artifact_uuid=artifact_uuid,
+                    ops_string="+1:^xyz",
+                    references=["^xyz"],
+                    based_on_hash="abc",  # Only 3 chars
+                )
+
     def test_get_at_commit_current_state(self):
         """Get at commit for current hash returns current content."""
         with get_core() as core:
