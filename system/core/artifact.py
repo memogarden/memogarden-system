@@ -317,15 +317,15 @@ class ArtifactOperations:
         if row["type"] != "Artifact":
             raise ValueError(f"Entity {artifact_uuid} is not an Artifact")
 
-        # Check optimistic lock
+        # Check optimistic lock (compare first 8 chars of entity hash)
         current_hash = row["hash"]
-        if current_hash != based_on_hash:
+        if current_hash[:8] != based_on_hash:
             raise ConflictError(
                 f"Artifact modified since last read. "
-                f"Expected hash {based_on_hash}, current hash {current_hash}",
+                f"Expected hash {based_on_hash}, current hash {current_hash[:8]}",
                 artifact_uuid=artifact_uuid,
                 expected_hash=based_on_hash,
-                actual_hash=current_hash,
+                actual_hash=current_hash[:8],
             )
 
         # Parse artifact data
