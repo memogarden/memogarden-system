@@ -323,7 +323,7 @@ def get_core() -> Core:
 # DATABASE INITIALIZATION
 # ============================================================================
 
-EXPECTED_SCHEMA_VERSION = "20260130"
+EXPECTED_SCHEMA_VERSION = "20261105"
 
 
 def _get_current_schema_version(db: sqlite3.Connection) -> str | None:
@@ -404,6 +404,8 @@ def _run_migrations(db: sqlite3.Connection) -> None:
     elif current_version == "20251230" and EXPECTED_SCHEMA_VERSION == "20260129":
         _apply_migration(db, current_version, EXPECTED_SCHEMA_VERSION)
     elif current_version == "20260129" and EXPECTED_SCHEMA_VERSION == "20260130":
+        _apply_migration(db, current_version, EXPECTED_SCHEMA_VERSION)
+    elif current_version == "20260130" and EXPECTED_SCHEMA_VERSION == "20261105":
         _apply_migration(db, current_version, EXPECTED_SCHEMA_VERSION)
     elif current_version < EXPECTED_SCHEMA_VERSION:
         # Skip migrations for older versions (would need multi-step migration in production)

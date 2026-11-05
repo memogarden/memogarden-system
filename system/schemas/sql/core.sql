@@ -139,6 +139,45 @@ CREATE TABLE IF NOT EXISTS api_keys (
 CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_active ON api_keys(revoked_at) WHERE revoked_at IS NULL;
 
+-- Provider registry (RFC-004 §12.2): server-side registry of data providers
+-- executing in-process in the server. Infrastructure table alongside
+-- api_keys — deliberately OUTSIDE the entity/delta machinery (deployment
+-- config, not user state). Provider credentials stay in HACM; the config
+-- JSON holds references only, never secrets.
+CREATE TABLE IF NOT EXISTS providers (
+    name TEXT PRIMARY KEY,                    -- slug ^[a-z][a-z0-9_-]{0,63}$
+    module TEXT NOT NULL,                     -- importable Python module
+    class TEXT NOT NULL,                      -- Provider Protocol class
+    interval INTEGER NOT NULL DEFAULT 3600 CHECK (interval >= 60),
+    enabled INTEGER NOT NULL DEFAULT 1,
+    description TEXT,
+    config TEXT NOT NULL DEFAULT '{}',        -- JSON; provider-opaque
+    capabilities TEXT NOT NULL DEFAULT '[]',  -- JSON; derived at registration
+    registered_at TEXT NOT NULL,
+    last_run_id TEXT,                         -- links into provider_runs
+    last_run_at TEXT,
+    last_status TEXT,                         -- 'success' | 'failed'
+    next_due_at TEXT                          -- NULL = due now
+);
+CREATE INDEX IF NOT EXISTS idx_providers_due ON providers(enabled, next_due_at);
+
+-- Provider run history; the partial unique index enforces single-flight
+-- (one running run per provider) across all server workers: the INSERT
+-- that claims a run fails if another run is still marked 'running'.
+CREATE TABLE IF NOT EXISTS provider_runs (
+    id TEXT PRIMARY KEY,
+    provider_name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'success', 'failed')),
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    triggered_by TEXT,                        -- 'heartbeat' | 'manual'
+    detail TEXT                               -- JSON: counts or error
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_runs_single_flight
+    ON provider_runs(provider_name) WHERE status = 'running';
+CREATE INDEX IF NOT EXISTS idx_provider_runs_provider
+    ON provider_runs(provider_name, started_at DESC);
+
 -- ============================================================================
 -- TRIGGERS
 -- ============================================================================
