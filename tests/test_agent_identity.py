@@ -19,7 +19,7 @@ from system.schemas import get_type_schema
 
 
 def _base_tables_sql() -> str:
-    """Table DTL shared by simulated pre-migration databases.
+    """Table DDL shared by simulated pre-migration databases.
 
     Deliberately WITHOUT api_keys.agent_entity_id — that is what the
     migration under test is responsible for adding.

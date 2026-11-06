@@ -405,8 +405,6 @@ def _run_migrations(db: sqlite3.Connection) -> None:
         _apply_migration(db, current_version, EXPECTED_SCHEMA_VERSION)
     elif current_version == "20260129" and EXPECTED_SCHEMA_VERSION == "20260130":
         _apply_migration(db, current_version, EXPECTED_SCHEMA_VERSION)
-    elif current_version == "20260130" and EXPECTED_SCHEMA_VERSION == "20261105":
-        _apply_migration(db, current_version, EXPECTED_SCHEMA_VERSION)
     elif current_version == "20261105" and EXPECTED_SCHEMA_VERSION == "20261106":
         _apply_migration(db, current_version, EXPECTED_SCHEMA_VERSION)
     elif current_version == "20260130" and EXPECTED_SCHEMA_VERSION == "20261106":
