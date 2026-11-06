@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS _schema_metadata (
 );
 
 INSERT OR IGNORE INTO _schema_metadata VALUES
-    ('version', '20260130', datetime('now')),
+    ('version', '20261106', datetime('now')),
     ('base_schema', 'memogarden-core-base', datetime('now')),
     ('description', 'Core base tables only; type schemas in JSON', datetime('now')),
     ('epoch_date', '2020-01-01', datetime('now'));
@@ -123,12 +123,15 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 
 -- API keys table for token-based authentication (RFC-004)
+-- agent_entity_id (RFC-010): nullable link to the Agent entity this key
+-- is attributed to. Unbound keys attribute to the owning username.
 CREATE TABLE IF NOT EXISTS api_keys (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
     name TEXT NOT NULL,
     key_hash TEXT NOT NULL,
     key_prefix TEXT NOT NULL,
+    agent_entity_id TEXT REFERENCES entity(uuid),
     expires_at TEXT,
     created_at TEXT NOT NULL,
     last_seen TEXT,

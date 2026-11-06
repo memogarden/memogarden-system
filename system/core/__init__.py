@@ -323,7 +323,7 @@ def get_core() -> Core:
 # DATABASE INITIALIZATION
 # ============================================================================
 
-EXPECTED_SCHEMA_VERSION = "20261105"
+EXPECTED_SCHEMA_VERSION = "20261106"
 
 
 def _get_current_schema_version(db: sqlite3.Connection) -> str | None:
@@ -405,8 +405,13 @@ def _run_migrations(db: sqlite3.Connection) -> None:
         _apply_migration(db, current_version, EXPECTED_SCHEMA_VERSION)
     elif current_version == "20260129" and EXPECTED_SCHEMA_VERSION == "20260130":
         _apply_migration(db, current_version, EXPECTED_SCHEMA_VERSION)
-    elif current_version == "20260130" and EXPECTED_SCHEMA_VERSION == "20261105":
+    elif current_version == "20261105" and EXPECTED_SCHEMA_VERSION == "20261106":
         _apply_migration(db, current_version, EXPECTED_SCHEMA_VERSION)
+    elif current_version == "20260130" and EXPECTED_SCHEMA_VERSION == "20261106":
+        # Database predates the providers tables: apply the pending
+        # migrations in order (fresh databases seed at EXPECTED directly)
+        _apply_migration(db, "20260130", "20261105")
+        _apply_migration(db, "20261105", EXPECTED_SCHEMA_VERSION)
     elif current_version < EXPECTED_SCHEMA_VERSION:
         # Skip migrations for older versions (would need multi-step migration in production)
         # This allows development to continue without full migration support

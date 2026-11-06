@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.memogarden.net/entities/agent.schema.json",
+  "title": "Agent",
+  "description": "Persistent actor identity (RFC-010): a tool, assistant, or automated client that holds MemoGarden credentials (API keys) and performs operations. Identity is operator-minted and survives key rotation; API keys reference it via api_keys.agent_entity_id.",
+  "allOf": [
+    {
+      "$ref": "entity.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "_type": {
+          "const": "Agent"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string",
+              "description": "Operator-facing name for this agent; unique among Agent entities (endpoint-enforced)",
+              "examples": ["claude-code", "gmail-ingest", "studio-agent"]
+            },
+            "description": {
+              "type": "string",
+              "description": "Free text: what this agent is and where it runs"
+            },
+            "owner": {
+              "type": "string",
+              "description": "Owning user id (users.id). Single-operator today; matches RFC-001 4.4 multi-operator posture"
+            }
+          },
+          "required": ["label", "owner"]
+        }
+      }
+    }
+  ]
+}
