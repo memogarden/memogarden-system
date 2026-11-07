@@ -77,6 +77,18 @@ class Soil:
             self._conn.close()
             self._conn = None
 
+    def commit(self) -> None:
+        """Commit the current transaction without leaving the context.
+
+        Needed when other connections must observe this instance's writes
+        mid-context — e.g. the provider runtime committing each fact before
+        a provider's create_relations() looks it up through its own Soil
+        instance (RFC-004 §12.2: providers yield, the runtime stores, and
+        relation resolution reads what the runtime just stored).
+        """
+        if self._conn is not None:
+            self._conn.commit()
+
     def __enter__(self) -> Soil:
         """Enter context manager for transaction.
 
