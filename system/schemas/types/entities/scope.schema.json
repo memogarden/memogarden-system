@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://schemas.memogarden.net/entities/scope.schema.json",
   "title": "Scope",
-  "description": "First-class work container with context tracking (RFC-003, RFC-009). Scopes organize work and own ContextFrames for attention tracking.",
+  "description": "First-class work container with context tracking (RFC-003, RFC-009). Scopes organize work and own ContextFrames for attention tracking, and are access boundaries (RFC-011): entering requires a grant; items carry scope membership in metadata.scopes.",
   "allOf": [
     {
       "$ref": "entity.schema.json"
