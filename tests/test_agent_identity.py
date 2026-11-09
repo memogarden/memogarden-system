@@ -5,8 +5,8 @@ Covers:
   api_keys.agent_entity_id present
 - Migration 20261105 -> 20261106 adds the column to existing databases
   without disturbing existing rows
-- The 20260130 -> 20261106 chain (databases predating the providers
-  tables) applies both pending migrations in order
+- The migration chain (e.g. 20260130 -> ... -> EXPECTED, databases
+  predating the providers tables) applies all pending migrations in order
 - The Agent entity type schema is loadable via system.schemas
 """
 
@@ -21,8 +21,10 @@ from system.schemas import get_type_schema
 def _base_tables_sql() -> str:
     """Table DDL shared by simulated pre-migration databases.
 
-    Deliberately WITHOUT api_keys.agent_entity_id — that is what the
-    migration under test is responsible for adding.
+    Deliberately WITHOUT api_keys.agent_entity_id and api_keys.grants —
+    those are what the migrations under test are responsible for adding.
+    context_frame is the pre-20261109 shape (active_scopes/primary_scope)
+    so the RFC-011 fold step can run against it.
     """
     return """
 CREATE TABLE _schema_metadata (
@@ -64,6 +66,17 @@ CREATE TABLE api_keys (
     FOREIGN KEY (id) REFERENCES entity(uuid) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+CREATE TABLE context_frame (
+    uuid TEXT PRIMARY KEY,
+    project_uuid TEXT,
+    participant TEXT NOT NULL,
+    containers JSON NOT NULL,
+    created_at TEXT NOT NULL,
+    parent_frame_uuid TEXT,
+    active_scopes JSON NOT NULL DEFAULT '[]',
+    primary_scope TEXT
+);
+CREATE INDEX idx_context_frame_primary_scope ON context_frame(primary_scope);
 """
 
 
@@ -98,6 +111,7 @@ def test_fresh_schema_seeds_at_expected_version_with_agent_column(tmp_path):
 
     assert _schema_version(db) == EXPECTED_SCHEMA_VERSION
     assert "agent_entity_id" in _api_key_columns(db)
+    assert "grants" in _api_key_columns(db)
 
 
 def test_migration_from_20261105_adds_column_preserving_rows(tmp_path):
@@ -188,6 +202,6 @@ def test_agent_entity_type_schema_loads():
     assert set(required) == {"label", "owner"}
 
 
-def test_expected_version_is_20261106():
+def test_expected_version_is_20261109():
     """Guard against accidental version regression in this branch."""
-    assert EXPECTED_SCHEMA_VERSION == "20261106"
+    assert EXPECTED_SCHEMA_VERSION == "20261109"

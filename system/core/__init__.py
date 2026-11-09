@@ -323,7 +323,21 @@ def get_core() -> Core:
 # DATABASE INITIALIZATION
 # ============================================================================
 
-EXPECTED_SCHEMA_VERSION = "20261106"
+EXPECTED_SCHEMA_VERSION = "20261109"
+
+# Ordered schema version history; each consecutive pair maps to
+# migrations/migrate_<from>_to_<to>.sql (applied by _run_migrations).
+# Append the new version here + add the migration file when bumping.
+SCHEMA_VERSION_CHAIN = [
+    "20251223",
+    "20251229",
+    "20251230",
+    "20260129",
+    "20260130",
+    "20261105",
+    "20261106",
+    "20261109",
+]
 
 
 def _get_current_schema_version(db: sqlite3.Connection) -> str | None:
@@ -396,25 +410,23 @@ def _run_migrations(db: sqlite3.Connection) -> None:
         # Already at expected version, no migration needed
         return
 
-    # Direct migration paths
-    if current_version == "20251223" and EXPECTED_SCHEMA_VERSION == "20251229":
-        _apply_migration(db, current_version, EXPECTED_SCHEMA_VERSION)
-    elif current_version == "20251229" and EXPECTED_SCHEMA_VERSION == "20251230":
-        _apply_migration(db, current_version, EXPECTED_SCHEMA_VERSION)
-    elif current_version == "20251230" and EXPECTED_SCHEMA_VERSION == "20260129":
-        _apply_migration(db, current_version, EXPECTED_SCHEMA_VERSION)
-    elif current_version == "20260129" and EXPECTED_SCHEMA_VERSION == "20260130":
-        _apply_migration(db, current_version, EXPECTED_SCHEMA_VERSION)
-    elif current_version == "20261105" and EXPECTED_SCHEMA_VERSION == "20261106":
-        _apply_migration(db, current_version, EXPECTED_SCHEMA_VERSION)
-    elif current_version == "20260130" and EXPECTED_SCHEMA_VERSION == "20261106":
-        # Database predates the providers tables: apply the pending
-        # migrations in order (fresh databases seed at EXPECTED directly)
-        _apply_migration(db, "20260130", "20261105")
-        _apply_migration(db, "20261105", EXPECTED_SCHEMA_VERSION)
-    elif current_version < EXPECTED_SCHEMA_VERSION:
-        # Skip migrations for older versions (would need multi-step migration in production)
-        # This allows development to continue without full migration support
+    # Walk the version chain forward, applying each consecutive migration
+    # (fresh databases seed at EXPECTED directly)
+    if (
+        current_version in SCHEMA_VERSION_CHAIN
+        and EXPECTED_SCHEMA_VERSION in SCHEMA_VERSION_CHAIN
+    ):
+        from_idx = SCHEMA_VERSION_CHAIN.index(current_version)
+        to_idx = SCHEMA_VERSION_CHAIN.index(EXPECTED_SCHEMA_VERSION)
+        if from_idx < to_idx:
+            for i in range(from_idx, to_idx):
+                _apply_migration(db, SCHEMA_VERSION_CHAIN[i], SCHEMA_VERSION_CHAIN[i + 1])
+            return
+
+    if current_version < EXPECTED_SCHEMA_VERSION:
+        # Skip migrations for versions unknown to the chain (would need
+        # hand-crafted migration in production). This allows development to
+        # continue without full migration support.
         pass
     elif current_version > EXPECTED_SCHEMA_VERSION:
         # Database is newer than code - this is OK (forward compatible)
@@ -464,6 +476,47 @@ def init_db():
 
         db.executescript(schema_sql)
         db.commit()
+
+
+# ============================================================================
+# BUILTIN SCOPES (RFC-011 §4.1)
+# ============================================================================
+
+# (slug, label) — ordinary restricted Scope entities, identified by label.
+BUILTIN_SCOPES = (
+    ("triage", "Triage / Untrusted"),
+    ("private", "Private"),
+)
+
+
+def ensure_builtin_scopes() -> list[str]:
+    """Provision builtin scopes idempotently (RFC-011 §4.1, §8 step 1).
+
+    Builtin scopes are ordinary Scope entities (restricted like every scope);
+    nothing distinguishes them structurally — they are conventions the
+    operator's grants and provider policies point at. Entity rows are
+    hash-chained, so seeding goes through Core.entity.create, never raw SQL.
+
+    Safe to call at every startup: creates only what is missing.
+
+    Returns:
+        UUIDs of scopes created by this call (empty if all existed).
+    """
+    created: list[str] = []
+    with get_core() as core:
+        for _slug, label in BUILTIN_SCOPES:
+            row = core._conn.execute(
+                "SELECT uuid FROM entity "
+                "WHERE type = 'Scope' AND json_extract(data, '$.label') = ?",
+                (label,),
+            ).fetchone()
+            if row is None:
+                uuid = core.entity.create(
+                    entity_type="Scope",
+                    data={"label": label, "active_participants": [], "artifact_uuids": []},
+                )
+                created.append(uuid)
+    return created
 
 
 # ============================================================================
@@ -526,6 +579,9 @@ def init_system(verb: str = "run") -> dict:
 
     # Initialize Core database (creates if missing, applies migrations)
     init_db()
+
+    # Provision builtin scopes (RFC-011 §4.1: triage, private) — idempotent
+    ensure_builtin_scopes()
 
     # Initialize Soil database (creates if missing, applies migrations)
     with get_soil(str(soil_db_path)) as soil:

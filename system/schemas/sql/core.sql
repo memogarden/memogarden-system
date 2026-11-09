@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS _schema_metadata (
 );
 
 INSERT OR IGNORE INTO _schema_metadata VALUES
-    ('version', '20261106', datetime('now')),
+    ('version', '20261109', datetime('now')),
     ('base_schema', 'memogarden-core-base', datetime('now')),
     ('description', 'Core base tables only; type schemas in JSON', datetime('now')),
     ('epoch_date', '2020-01-01', datetime('now'));
@@ -96,16 +96,16 @@ CREATE TABLE IF NOT EXISTS context_frame (
     created_at TEXT NOT NULL,
     parent_frame_uuid TEXT,
 
-    -- RFC-003 v4: Scope activation (INV-11, INV-11a, INV-11b)
-    active_scopes JSON NOT NULL DEFAULT '[]',  -- Array of active scope UUIDs
-    primary_scope TEXT,                        -- Currently focused scope (NULL = no primary)
+    -- RFC-003 v5 / RFC-011: exclusive activation (INV-11a) — the single
+    -- active scope; NULL = unscoped operation (global space)
+    active_scope TEXT,
 
     FOREIGN KEY (parent_frame_uuid) REFERENCES context_frame(uuid)
 );
 
 CREATE INDEX IF NOT EXISTS idx_context_frame_participant ON context_frame(participant);
 CREATE INDEX IF NOT EXISTS idx_context_frame_project ON context_frame(project_uuid);
-CREATE INDEX IF NOT EXISTS idx_context_frame_primary_scope ON context_frame(primary_scope);
+CREATE INDEX IF NOT EXISTS idx_context_frame_active_scope ON context_frame(active_scope);
 
 -- ============================================================================
 -- AUTHENTICATION TABLES
@@ -125,6 +125,8 @@ CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 -- API keys table for token-based authentication (RFC-004)
 -- agent_entity_id (RFC-010): nullable link to the Agent entity this key
 -- is attributed to. Unbound keys attribute to the owning username.
+-- grants (RFC-011 §4.3): operator-issued scope entry permissions,
+-- [{scope_uuid, granted_at, expires_at|null}]; [] = unscoped-only.
 CREATE TABLE IF NOT EXISTS api_keys (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -132,6 +134,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
     key_hash TEXT NOT NULL,
     key_prefix TEXT NOT NULL,
     agent_entity_id TEXT REFERENCES entity(uuid),
+    grants JSON NOT NULL DEFAULT '[]',
     expires_at TEXT,
     created_at TEXT NOT NULL,
     last_seen TEXT,
