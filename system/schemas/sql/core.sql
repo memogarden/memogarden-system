@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS _schema_metadata (
 );
 
 INSERT OR IGNORE INTO _schema_metadata VALUES
-    ('version', '20261109', datetime('now')),
+    ('version', '20261113', datetime('now')),
     ('base_schema', 'memogarden-core-base', datetime('now')),
     ('description', 'Core base tables only; type schemas in JSON', datetime('now')),
     ('epoch_date', '2020-01-01', datetime('now'));
@@ -159,6 +159,11 @@ CREATE TABLE IF NOT EXISTS providers (
     description TEXT,
     config TEXT NOT NULL DEFAULT '{}',        -- JSON; provider-opaque
     capabilities TEXT NOT NULL DEFAULT '[]',  -- JSON; derived at registration
+    scope_policy TEXT,                        -- JSON; RFC-011 §4.8 operator
+                                              -- policy: {rules: [{match, scope}],
+                                              -- default: uuid|alias|null}.
+                                              -- NULL = ratified default
+                                              -- (catch-all → triage)
     registered_at TEXT NOT NULL,
     last_run_id TEXT,                         -- links into provider_runs
     last_run_at TEXT,

@@ -77,6 +77,21 @@ CREATE TABLE context_frame (
     primary_scope TEXT
 );
 CREATE INDEX idx_context_frame_primary_scope ON context_frame(primary_scope);
+CREATE TABLE providers (
+    name TEXT PRIMARY KEY,
+    module TEXT NOT NULL,
+    class TEXT NOT NULL,
+    interval INTEGER NOT NULL DEFAULT 3600,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    description TEXT,
+    config TEXT NOT NULL DEFAULT '{}',
+    capabilities TEXT NOT NULL DEFAULT '[]',
+    registered_at TEXT NOT NULL,
+    last_run_id TEXT,
+    last_run_at TEXT,
+    last_status TEXT,
+    next_due_at TEXT
+);
 """
 
 
@@ -202,6 +217,6 @@ def test_agent_entity_type_schema_loads():
     assert set(required) == {"label", "owner"}
 
 
-def test_expected_version_is_20261109():
+def test_expected_version_is_20261113():
     """Guard against accidental version regression in this branch."""
-    assert EXPECTED_SCHEMA_VERSION == "20261109"
+    assert EXPECTED_SCHEMA_VERSION == "20261113"

@@ -206,3 +206,71 @@ class TestMigration20261109:
             "SELECT value FROM _schema_metadata WHERE key = 'version'"
         ).fetchone()
         assert version["value"] == "20261109"
+
+
+class TestProviderScopePolicyColumn:
+    """RFC-011 §4.8 item 4: providers.scope_policy (schema 20261113)."""
+
+    def test_fresh_schema_has_scope_policy_column(self, tmp_path):
+        """A database built from canonical core.sql has the column and
+        seeds directly at EXPECTED_SCHEMA_VERSION."""
+        from system.core import EXPECTED_SCHEMA_VERSION
+        from system.schemas import get_sql_schema
+
+        db = sqlite3.connect(str(tmp_path / "fresh.db"))
+        db.executescript(get_sql_schema("core"))
+
+        version = db.execute(
+            "SELECT value FROM _schema_metadata WHERE key = 'version'"
+        ).fetchone()
+        assert version[0] == EXPECTED_SCHEMA_VERSION == "20261113"
+        cols = {row[1] for row in db.execute("PRAGMA table_info(providers)")}
+        assert "scope_policy" in cols
+
+    def test_migration_from_20261109_adds_column(self, tmp_path):
+        """An existing 20261109 database gains providers.scope_policy; the
+        chain runner walks it there in one init."""
+        db = sqlite3.connect(str(tmp_path / "old.db"))
+        db.row_factory = sqlite3.Row
+        db.executescript(
+            """
+            CREATE TABLE _schema_metadata (
+                key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL
+            );
+            INSERT INTO _schema_metadata VALUES ('version', '20261109', datetime('now'));
+            CREATE TABLE providers (
+                name TEXT PRIMARY KEY,
+                module TEXT NOT NULL,
+                class TEXT NOT NULL,
+                interval INTEGER NOT NULL DEFAULT 3600,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                description TEXT,
+                config TEXT NOT NULL DEFAULT '{}',
+                capabilities TEXT NOT NULL DEFAULT '[]',
+                registered_at TEXT NOT NULL,
+                last_run_id TEXT,
+                last_run_at TEXT,
+                last_status TEXT,
+                next_due_at TEXT
+            );
+            INSERT INTO providers (name, module, class, registered_at)
+                VALUES ('gmail_importer', 'mod', 'Cls', '2026-11-09T00:00:00Z');
+            """
+        )
+        db.commit()
+
+        from system.core import _run_migrations
+        _run_migrations(db)
+
+        version = db.execute(
+            "SELECT value FROM _schema_metadata WHERE key = 'version'"
+        ).fetchone()[0]
+        assert version == "20261113"
+        cols = {row[1] for row in db.execute("PRAGMA table_info(providers)")}
+        assert "scope_policy" in cols
+        # Existing row intact; policy NULL (= ratified default catch-all)
+        row = db.execute(
+            "SELECT name, scope_policy FROM providers WHERE name = 'gmail_importer'"
+        ).fetchone()
+        assert row["name"] == "gmail_importer"
+        assert row["scope_policy"] is None
