@@ -69,6 +69,12 @@ class Soil:
             self._conn.row_factory = sqlite3.Row
             self._conn.execute("PRAGMA foreign_keys = ON")
             self._conn.execute("PRAGMA journal_mode = WAL")
+            # RFC-012: N account runs + the CLI attachments pass now write
+            # one soil.db concurrently (heartbeat at :00 collides with
+            # manual runs) — WAL allows one writer; without a busy timeout
+            # a second writer fails instantly ("database is locked") and
+            # fails the whole run. Wait instead.
+            self._conn.execute("PRAGMA busy_timeout = 5000")
         return self._conn
 
     def close(self):
