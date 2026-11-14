@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS _schema_metadata (
 );
 
 INSERT OR IGNORE INTO _schema_metadata VALUES
-    ('version', '20261113', datetime('now')),
+    ('version', '20261114', datetime('now')),
     ('base_schema', 'memogarden-core-base', datetime('now')),
     ('description', 'Core base tables only; type schemas in JSON', datetime('now')),
     ('epoch_date', '2020-01-01', datetime('now'));
@@ -172,12 +172,17 @@ CREATE TABLE IF NOT EXISTS providers (
 );
 CREATE INDEX IF NOT EXISTS idx_providers_due ON providers(enabled, next_due_at);
 
--- Provider run history; the partial unique index enforces single-flight
--- (one running run per provider) across all server workers: the INSERT
--- that claims a run fails if another run is still marked 'running'.
+-- Provider run history; account_id (RFC-012 §4.4): '' = provider-level run
+-- (account-less providers and all pre-RFC-012 rows), otherwise the
+-- provider_accounts.id the run executed. The '' sentinel (not NULL) is
+-- deliberate: NULLs are distinct in SQLite unique indexes.
+-- The partial unique index enforces single-flight — one running run per
+-- (provider, account) — across all server workers: the INSERT that claims
+-- a run fails if another run is still marked 'running'.
 CREATE TABLE IF NOT EXISTS provider_runs (
     id TEXT PRIMARY KEY,
     provider_name TEXT NOT NULL,
+    account_id TEXT NOT NULL DEFAULT '',      -- RFC-012: '' = provider-level
     status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'success', 'failed')),
     started_at TEXT NOT NULL,
     finished_at TEXT,
@@ -185,9 +190,39 @@ CREATE TABLE IF NOT EXISTS provider_runs (
     detail TEXT                               -- JSON: counts or error
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_runs_single_flight
-    ON provider_runs(provider_name) WHERE status = 'running';
+    ON provider_runs(provider_name, account_id) WHERE status = 'running';
 CREATE INDEX IF NOT EXISTS idx_provider_runs_provider
     ON provider_runs(provider_name, started_at DESC);
+
+-- Provider accounts (RFC-012): one row per (provider, upstream identity).
+-- An account binds the provider to a verified subject (email/username) and
+-- a credential REFERENCE — tokens stay in HACM, never in this table.
+-- Accounts are not principals: they hold no grants and gate nothing
+-- (RFC-012 §3); they are the subject of attribution and labeling.
+CREATE TABLE IF NOT EXISTS provider_accounts (
+    id TEXT PRIMARY KEY,                      -- uuid
+    provider_name TEXT NOT NULL,              -- registry name this account feeds
+    platform TEXT NOT NULL,                   -- 'google' | 'github' | ...
+    subject TEXT NOT NULL,                    -- verified upstream identity (email/username)
+    label TEXT,                               -- operator nickname (CLI display)
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'needs_reauth', 'revoked', 'disabled')),
+    credential_ref TEXT NOT NULL,             -- HACM credential id ({platform}:{subject})
+    config TEXT NOT NULL DEFAULT '{}',        -- JSON; per-account config (overrides provider config)
+    capabilities TEXT NOT NULL DEFAULT '[]',  -- JSON; capability grants on this identity
+    error TEXT,                               -- last failure summary (CLI display)
+    interval INTEGER,                         -- NULL = inherit provider interval
+    next_due_at TEXT,                         -- per-account due time (NULL = due now)
+    last_run_id TEXT,                         -- links into provider_runs
+    last_run_at TEXT,
+    last_status TEXT,
+    last_verified_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (provider_name, subject)
+);
+CREATE INDEX IF NOT EXISTS idx_provider_accounts_due
+    ON provider_accounts(provider_name, status, next_due_at);
 
 -- ============================================================================
 -- TRIGGERS

@@ -223,7 +223,7 @@ class TestProviderScopePolicyColumn:
         version = db.execute(
             "SELECT value FROM _schema_metadata WHERE key = 'version'"
         ).fetchone()
-        assert version[0] == EXPECTED_SCHEMA_VERSION == "20261113"
+        assert version[0] == EXPECTED_SCHEMA_VERSION == "20261114"
         cols = {row[1] for row in db.execute("PRAGMA table_info(providers)")}
         assert "scope_policy" in cols
 
@@ -253,19 +253,28 @@ class TestProviderScopePolicyColumn:
                 last_status TEXT,
                 next_due_at TEXT
             );
+            CREATE TABLE provider_runs (
+                id TEXT PRIMARY KEY,
+                provider_name TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'running',
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                triggered_by TEXT,
+                detail TEXT
+            );
             INSERT INTO providers (name, module, class, registered_at)
                 VALUES ('gmail_importer', 'mod', 'Cls', '2026-11-09T00:00:00Z');
             """
         )
         db.commit()
 
-        from system.core import _run_migrations
+        from system.core import EXPECTED_SCHEMA_VERSION, _run_migrations
         _run_migrations(db)
 
         version = db.execute(
             "SELECT value FROM _schema_metadata WHERE key = 'version'"
         ).fetchone()[0]
-        assert version == "20261113"
+        assert version == EXPECTED_SCHEMA_VERSION
         cols = {row[1] for row in db.execute("PRAGMA table_info(providers)")}
         assert "scope_policy" in cols
         # Existing row intact; policy NULL (= ratified default catch-all)

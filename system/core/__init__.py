@@ -293,6 +293,10 @@ def _create_connection() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     # Enable WAL mode for better concurrent access
     conn.execute("PRAGMA journal_mode = WAL")
+    # Wait instead of failing instantly on contention: provider runs execute
+    # in parallel threads per account (RFC-012 §4.5), so concurrent
+    # read/write on provider_runs is routine, not exceptional.
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 
@@ -323,7 +327,7 @@ def get_core() -> Core:
 # DATABASE INITIALIZATION
 # ============================================================================
 
-EXPECTED_SCHEMA_VERSION = "20261113"
+EXPECTED_SCHEMA_VERSION = "20261114"
 
 # Ordered schema version history; each consecutive pair maps to
 # migrations/migrate_<from>_to_<to>.sql (applied by _run_migrations).
@@ -338,6 +342,7 @@ SCHEMA_VERSION_CHAIN = [
     "20261106",
     "20261109",
     "20261113",
+    "20261114",
 ]
 
 

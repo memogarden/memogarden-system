@@ -92,6 +92,15 @@ CREATE TABLE providers (
     last_status TEXT,
     next_due_at TEXT
 );
+CREATE TABLE provider_runs (
+    id TEXT PRIMARY KEY,
+    provider_name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'running',
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    triggered_by TEXT,
+    detail TEXT
+);
 """
 
 
@@ -217,6 +226,6 @@ def test_agent_entity_type_schema_loads():
     assert set(required) == {"label", "owner"}
 
 
-def test_expected_version_is_20261113():
+def test_expected_version_is_20261114():
     """Guard against accidental version regression in this branch."""
-    assert EXPECTED_SCHEMA_VERSION == "20261113"
+    assert EXPECTED_SCHEMA_VERSION == "20261114"
