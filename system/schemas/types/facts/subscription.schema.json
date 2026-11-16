@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.memogarden.net/items/subscription.schema.json",
+  "title": "Subscription",
+  "description": "One RSS/Atom feed the operator subscribes to. Created by the operator (memogarden import opml); the provider enumerates Subscription facts to build the poll set. xml_url is the permanent identity anchor and never changes on redirects.",
+  "allOf": [
+    {
+      "$ref": "item.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "_type": {
+          "const": "Subscription"
+        },
+        "xml_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "The feed URL as configured (OPML xmlUrl, whitespace-stripped). Dedup key; identity never changes on 301/308.",
+          "examples": ["https://rachelbythebay.com/w/atom.xml"]
+        },
+        "title": {
+          "type": "string",
+          "description": "Feed title (OPML @title/@text; first-seen wins)",
+          "examples": ["Rachel by the Bay"]
+        },
+        "html_url": {
+          "type": "string",
+          "description": "Site URL (OPML htmlUrl / feed link rel=alternate)",
+          "examples": ["https://rachelbythebay.com/w/"]
+        },
+        "categories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "OPML folder path, outermost first",
+          "examples": [["Tech Blogs"]]
+        }
+      },
+      "required": ["xml_url"]
+    }
+  ]
+}

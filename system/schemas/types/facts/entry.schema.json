@@ -1,0 +1,86 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.memogarden.net/items/entry.schema.json",
+  "title": "Entry",
+  "description": "One item from an RSS/Atom feed, first-seen frozen (immutable, hash-stable). The feed is the artifact: the provider fetches only feed URLs and stores feed-provided content verbatim. Publisher edits surface as revision Note facts; enclosures are pointers, never downloaded.",
+  "allOf": [
+    {
+      "$ref": "item.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "_type": {
+          "const": "Entry"
+        },
+        "entry_id": {
+          "type": "string",
+          "description": "Stable item identity (guid / atom:id / rdf:about / normalized link / hash(title+published)). Dedup key is (metadata.feed, entry_id) — guids are only unique per feed.",
+          "examples": ["https://rachelbythebay.com/w/2024/12/17/packets"]
+        },
+        "title": {
+          "type": "string",
+          "description": "Entry title at first sight",
+          "examples": ["Feed readers which don't take 'no' for an answer"]
+        },
+        "link": {
+          "type": "string",
+          "description": "Entry permalink, resolved absolute",
+          "examples": ["https://rachelbythebay.com/w/2024/12/17/packets/"]
+        },
+        "published": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Entry date, ISO 8601 UTC (pubDate/published; updated preferred when there is no published)",
+          "examples": ["2024-12-17T00:00:00+00:00"]
+        },
+        "updated": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last-modified time, ISO 8601 UTC — NOT an HTTP validator (the NextCloud-News anti-pattern); used only for revision detection.",
+          "examples": ["2024-12-17T13:00:00+00:00"]
+        },
+        "author": {
+          "type": "string",
+          "description": "Author name(s) at first sight",
+          "examples": ["rachelbythebay"]
+        },
+        "description": {
+          "type": "string",
+          "description": "Feed-provided content verbatim, untruncated. Untrusted third-party HTML; renderers must treat it as such.",
+          "examples": ["<p>Packet-level timeline of a client that …</p>"]
+        },
+        "content_type": {
+          "type": "string",
+          "description": "text/plain | text/html (default html when description present)",
+          "examples": ["text/html"]
+        },
+        "content_hash": {
+          "type": "string",
+          "description": "SHA-256 of description (hex); keeps revision detection off the big columns",
+          "examples": ["9f2b…"]
+        },
+        "enclosures": {
+          "type": "array",
+          "description": "Pointers only — never downloaded. {url, type, length}.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "length": {
+                "type": "string"
+              }
+            },
+            "required": ["url"]
+          }
+        }
+      },
+      "required": ["entry_id"]
+    }
+  ]
+}
