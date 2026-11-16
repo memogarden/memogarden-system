@@ -40,7 +40,7 @@ class Evidence:
 class Fact:
     """Base Fact class (immutable fact in Soil)."""
     uuid: str
-    _type: str  # 'Note' | 'Message' | 'Email' | 'ToolCall' | 'EntityDelta' | 'SystemEvent'
+    _type: str  # 'Note' | 'Message' | 'Email' | 'ToolCall' | 'EntityDelta' | 'SystemEvent' | 'EventOccurrence' (RFC-014) | 'Action' | 'ActionResult'
     realized_at: str  # ISO 8601
     canonical_at: str  # ISO 8601
     integrity_hash: str | None = None

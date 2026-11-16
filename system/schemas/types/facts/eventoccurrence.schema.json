@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.memogarden.net/items/eventoccurrence.schema.json",
+  "title": "EventOccurrence",
+  "description": "Immutable memory of an occurrence (RFC-014 §6.3). Created ONLY by the mark-occurred review action on a Core Event entity — never by providers, never on date passage. Events are the beliefs; observed/experienced events are the fact stream.",
+  "allOf": [
+    {
+      "$ref": "item.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "_type": {
+          "const": "EventOccurrence"
+        },
+        "event_uuid": {
+          "type": "string",
+          "pattern": "^core_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "description": "The Core Event entity this occurrence realizes (core_-prefixed)",
+          "examples": ["core_12345678-1234-1234-1234-123456789abc"]
+        },
+        "occurred_at": {
+          "type": "string",
+          "description": "Real-world ground truth supplied by review (timezone-aware ISO); providers never set it, date passage never sets it"
+        },
+        "snapshot": {
+          "type": "object",
+          "description": "The event's belief fields at marking time (title, starts_at, ends_at, location, participants, organizer, status) — immutable memory of the schedule as believed",
+          "properties": {
+            "title": { "type": ["string", "null"] },
+            "starts_at": { "type": ["string", "null"] },
+            "ends_at": { "type": ["string", "null"] },
+            "location": { "type": ["string", "null"] },
+            "participants": { "type": ["array", "null"], "items": { "type": "string" } },
+            "organizer": { "type": ["string", "null"] },
+            "status": { "type": ["string", "null"] }
+          }
+        }
+      },
+      "required": ["event_uuid", "occurred_at", "snapshot"]
+    }
+  ]
+}
