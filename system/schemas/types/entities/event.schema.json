@@ -1,0 +1,108 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.memogarden.net/entities/event.schema.json",
+  "title": "Event",
+  "description": "Core Event entity: a BELIEF about a concrete scheduled occurrence (RFC-014). Mutable; never a Soil fact by itself — the EventOccurrence fact exists only after an explicit mark-occurred review action (never on date passage). Events are individual instantiations: a recurrence series contributes many Events linked via a NATIVE recurring_event_id. No all_day flag: date-only starts_at/ends_at IS the time ambiguity. ends_at is EXCLUSIVE.",
+  "allOf": [
+    {
+      "$ref": "entity.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "_type": {
+          "const": "Event"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "source_id": {
+              "type": "string",
+              "description": "NATIVE source id (Event analogue of rfc_message_id). Unique per calendar only — natural key carries calendar_id."
+            },
+            "title": { "type": ["string", "null"] },
+            "description": { "type": ["string", "null"] },
+            "location": { "type": ["string", "null"] },
+            "starts_at": {
+              "type": "string",
+              "description": "UTC datetime or bare date (YYYY-MM-DD); date-only = time ambiguity (naturally all-day), no timezone."
+            },
+            "ends_at": {
+              "type": ["string", "null"],
+              "description": "Same union as starts_at. EXCLUSIVE end (RFC 5545 DTEND: a one-day date-only event ends the next day)."
+            },
+            "occurred_at": {
+              "type": ["string", "null"],
+              "description": "Null = has not happened / did not happen. Set ONLY by mark-occurred review; providers never set it; date passage never sets it."
+            },
+            "status": {
+              "type": "string",
+              "enum": ["confirmed", "tentative"],
+              "description": "Source truth of the schedule; cancelled events are never stored (removal stamped instead)."
+            },
+            "participants": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Plain identifier strings (email preferred); capped at participants_max with metadata.attendee_count preserving the true count."
+            },
+            "organizer": { "type": ["string", "null"] },
+            "source": {
+              "type": "string",
+              "enum": ["google_calendar"],
+              "description": "Provider provenance — stored flat in entity.data (entities have a single JSON data column; RFC-014 §2.2 storage mapping)."
+            },
+            "account": {
+              "type": "string",
+              "description": "RFC-012 INV-7 attribution; scope-rule matchable; part of the natural key."
+            },
+            "calendar_id": {
+              "type": "string",
+              "description": "Source calendar id; part of the natural key; scope-rule matchable."
+            },
+            "calendar_summary": { "type": ["string", "null"] },
+            "event_id": { "type": "string" },
+            "ical_uid": { "type": ["string", "null"] },
+            "etag": {
+              "type": "string",
+              "description": "Source change token; drives upsert no-op detection."
+            },
+            "updated_at": { "type": ["string", "null"] },
+            "recurring_event_id": {
+              "type": ["string", "null"],
+              "description": "NATIVE id of the source pattern (never dangles — tada follows_from precedent)."
+            },
+            "original_start_at": {
+              "type": ["string", "null"],
+              "description": "Start time this instance had in the series before a move."
+            },
+            "captured_after_fact": {
+              "type": "boolean",
+              "description": "Seeded history: calendar asserted it, we never live-observed it (review triage marker)."
+            },
+            "source_status": {
+              "type": "string",
+              "enum": ["cancelled"],
+              "description": "Removal stamp; companions removed_at_source + detection_source."
+            },
+            "removed_at_source": { "type": ["string", "null"] },
+            "detection_source": {
+              "type": "string",
+              "enum": ["sync_tombstone", "audit_diff"]
+            },
+            "self_response": {
+              "type": ["string", "null"],
+              "enum": ["accepted", "declined", "tentative", "needsAction", null]
+            },
+            "attendee_count": { "type": ["integer", "null"] },
+            "scopes": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Runtime-applied scope labels (entity analogue of fact metadata.scopes; provider-set wins over policy)."
+            }
+          },
+          "required": ["source_id", "starts_at", "status", "source", "account", "calendar_id", "event_id", "etag"]
+        }
+      }
+    }
+  ]
+}

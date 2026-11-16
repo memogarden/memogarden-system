@@ -501,3 +501,54 @@ class EntityOperations:
         ).fetchone()
 
         return row is not None
+
+    def find_by_data(
+        self,
+        entity_type: str,
+        filters: dict,
+        include_superseded: bool = False,
+    ) -> dict | None:
+        """Find an entity by natural-key equality over its data fields.
+
+        Provider runtime natural-key lookups (RFC-014 §3.2): filters is a
+        {field: value} dict matched as json_extract(data, '$.<field>') =
+        value against top-level entity.data fields (dotted segments
+        become nested paths, each segment quoted). Returns the parsed
+        entity dict, or None when nothing matches.
+
+        Returns None (never raises ResourceNotFound) — "absent" is a
+        normal outcome for upsert flows, not an error. Field names are
+        restricted to [A-Za-z0-9_.] so the path text is always safe to
+        embed in SQL. Only non-superseded entities participate unless
+        include_superseded is set.
+        """
+        import json
+        import re
+
+        where = ["type = ?"]
+        params: list = [entity_type]
+        if not include_superseded:
+            where.append("superseded_by IS NULL")
+        for field, value in filters.items():
+            if not re.fullmatch(r"[A-Za-z0-9_.]+", field):
+                raise ValueError(f"invalid data field path: {field!r}")
+            path = "$." + ".".join('"%s"' % seg for seg in field.split("."))
+            where.append("json_extract(data, ?) = ?")
+            params.extend([path, value])
+        sql = "SELECT * FROM entity WHERE " + " AND ".join(where)
+        rows = self._conn.execute(sql, params).fetchall()
+        if len(rows) > 1:
+            # A natural key that matches multiple live entities is a
+            # contract violation (provider dedup is supposed to prevent
+            # it) — fail loudly rather than silently update an arbitrary
+            # row.
+            matches = ", ".join(f"{k}={v!r}" for k, v in filters.items())
+            raise ValueError(
+                f"ambiguous natural key: {len(rows)} {entity_type} entities match {matches}"
+            )
+        if not rows:
+            return None
+        entity = dict(rows[0])
+        if entity.get("data"):
+            entity["data"] = json.loads(entity["data"])
+        return entity
