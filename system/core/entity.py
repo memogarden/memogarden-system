@@ -359,6 +359,7 @@ class EntityOperations:
         include_superseded: bool = False,
         limit: int = 100,
         offset: int = 0,
+        data_filters: dict | None = None,
     ) -> tuple[list[dict], int]:
         """Query entities with filters.
 
@@ -367,11 +368,17 @@ class EntityOperations:
             include_superseded: If True, include superseded entities (default: False)
             limit: Maximum number of results
             offset: Number of results to skip
+            data_filters: {field: value} equality matches over entity.data
+                (#27) — the same path rule as find_by_data ([A-Za-z0-9_.]+,
+                dotted segments become nested json paths). Applied in the
+                WHERE clause, so filtering happens BEFORE pagination, and
+                the COUNT shares the same predicate.
 
         Returns:
             Tuple of (list of entity dicts with parsed JSON, total count)
         """
         import json
+        import re
 
         # Build WHERE clause
         where_parts = []
@@ -385,6 +392,15 @@ class EntityOperations:
         # Filter by superseded status (default: exclude superseded)
         if not include_superseded:
             where_parts.append("superseded_by IS NULL")
+
+        # Data-field equality filters (#27) — find_by_data's path rule;
+        # WHERE-level, therefore pre-pagination.
+        for field, value in (data_filters or {}).items():
+            if not re.fullmatch(r"[A-Za-z0-9_.]+", field):
+                raise ValueError(f"invalid data field path: {field!r}")
+            path = "$." + ".".join('"%s"' % seg for seg in field.split("."))
+            where_parts.append("json_extract(data, ?) = ?")
+            params.extend([path, value])
 
         # Build full query
         where_clause = " AND ".join(where_parts) if where_parts else "1=1"
