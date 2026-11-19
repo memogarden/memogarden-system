@@ -761,8 +761,21 @@ def init_system(verb: str = "run") -> dict:
 
     # Get database paths (RFC-004 context resolution)
     ctx = resolve_context(verb)
+    # Both paths resolve through the canonical runtime resolver —
+    # RuntimeContext.get_db_path delegates to module-level get_db_path()
+    # (RFC-004 INV-PKG-001 env chain, cwd fallback), the same resolution
+    # get_core()/get_soil()/init_db() use. Before memogarden-system#7 the
+    # context applied its own verb default: MEMOGARDEN_DATA_DIR deploys
+    # initialized soil at the verb default while the runtime read the env
+    # path, leaving the app with an empty soil.db (every Soil-touching
+    # endpoint 500'd with "no such table: item").
     soil_db_path = ctx.get_db_path('soil')
-    core_db_path = ctx.get_db_path('core')
+    # Core additionally honors the settings-level override, exactly like
+    # _create_connection()/init_db() do.
+    if settings.database_path is not None:
+        core_db_path = Path(settings.database_path)
+    else:
+        core_db_path = ctx.get_db_path('core')
 
     # Check if databases exist
     soil_exists = os.path.exists(soil_db_path)

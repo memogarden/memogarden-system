@@ -45,13 +45,29 @@ class RuntimeContext:
     def get_db_path(self, db_name: str) -> Path:
         """Return database file path for given context.
 
+        Delegates to the module-level get_db_path() — the canonical
+        resolver the whole runtime (get_core, get_soil, init_db) uses —
+        so every consumer, including greenfield init_system, lands on
+        the same files (memogarden-system#7). Before #7 this method
+        applied the verb default (data_dir/{db_name}.db), which ignored
+        the RFC-004 env chain and left init_system resolving soil at the
+        verb default while the runtime read the env path: fresh
+        MEMOGARDEN_DATA_DIR deploys got an empty soil.db and every
+        Soil-touching endpoint 500'd.
+
+        The verb default still governs config and log locations
+        (get_config_path, get_log_path); database paths belong to the
+        env resolution contract (RFC-004 INV-PKG-001).
+
         Args:
             db_name: Database name ('soil' or 'core')
 
         Returns:
             Path to database file
         """
-        return self.data_dir / f"{db_name}.db"
+        # Late-bound module function (defined below the class); the
+        # parameter name differs so there is no shadowing.
+        return get_db_path(db_name)
 
     def get_config_path(self) -> Path:
         """Return config file path for given context."""
@@ -192,6 +208,33 @@ def get_env(key: str, default: str | None = None) -> str | None:
     return os.environ.get(key, default)
 
 
+def env_db_override(layer: str) -> Optional[Path]:
+    """Environment-variable DB path override (RFC-004 INV-PKG-001 steps 1-2).
+
+    Shared precedence for both path consumers:
+    1. Layer-specific environment variable (MEMOGARDEN_{LAYER}_DB)
+    2. Shared data directory (MEMOGARDEN_DATA_DIR/{layer}.db)
+
+    Returns None when neither variable is set, leaving the caller's own
+    default in effect: get_db_path falls back to ./{layer}.db
+    (INV-PKG-002, backward compatible), and RuntimeContext.get_db_path
+    delegates to get_db_path wholesale.
+
+    Args:
+        layer: Database layer ('soil' or 'core')
+
+    Returns:
+        Path to database file, or None if no env override applies
+    """
+    layer_path = get_env(f"MEMOGARDEN_{layer.upper()}_DB")
+    if layer_path:
+        return Path(layer_path)
+    data_dir = get_env("MEMOGARDEN_DATA_DIR")
+    if data_dir:
+        return Path(data_dir) / f"{layer}.db"
+    return None
+
+
 def get_db_path(layer: str) -> Path:
     """Resolve database path for a layer (RFC-004).
 
@@ -199,6 +242,11 @@ def get_db_path(layer: str) -> Path:
     1. Layer-specific environment variable (MEMOGARDEN_{LAYER}_DB)
     2. Shared data directory (MEMOGARDEN_DATA_DIR/{layer}.db)
     3. Current directory (./{layer}.db)
+
+    RuntimeContext.get_db_path delegates here, so this is the single
+    canonical resolver: greenfield init (init_system) and the runtime
+    (get_core, get_soil) always agree on the same files
+    (memogarden-system#7).
 
     Args:
         layer: Database layer ('soil' or 'core')
@@ -227,16 +275,10 @@ def get_db_path(layer: str) -> Path:
     if layer not in ("soil", "core"):
         raise ValueError(f"Invalid layer: {layer}. Must be 'soil' or 'core'")
 
-    # 1. Layer-specific override (highest priority)
-    env_var = f"MEMOGARDEN_{layer.upper()}_DB"
-    layer_path = get_env(env_var)
-    if layer_path:
-        return Path(layer_path)
-
-    # 2. Shared data directory
-    data_dir = get_env("MEMOGARDEN_DATA_DIR")
-    if data_dir:
-        return Path(data_dir) / f"{layer}.db"
+    # 1-2. Environment overrides (layer var, then shared data dir)
+    override = env_db_override(layer)
+    if override is not None:
+        return override
 
     # 3. Default: current directory (backward compatible, INV-PKG-002)
     return Path(f"./{layer}.db")
