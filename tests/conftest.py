@@ -1,5 +1,7 @@
 """Pytest fixtures for memogarden-system tests."""
 
+import os
+
 import pytest
 import tempfile
 import sqlite3
@@ -8,8 +10,33 @@ from system.core import get_core, init_db as init_core_db
 from system.host.environment import get_db_path
 
 
+@pytest.fixture(scope="session", autouse=True)
+def pinned_db_env(tmp_path_factory):
+    """Pin RFC-004 DB path resolution to a session scratch directory.
+
+    Without a pin, the env chain (get_db_path) falls back to the current
+    directory: the autouse clean_database_before_tests fixture then
+    creates and bulk-DELETEs rows in ./core.db and ./soil.db in the repo
+    root on every run, and a developer who exports MEMOGARDEN_DATA_DIR
+    would point those DELETEs at their real data directory.
+
+    Session-wide os.environ mutation (not monkeypatch): function-scoped
+    tests override these vars with monkeypatch.setenv/delenv, which
+    restore the pinned values afterwards.
+
+    See memogarden-system#7 for how env-var path resolution went wrong
+    in production code — these tests must not repeat it.
+    """
+    os.environ["MEMOGARDEN_DATA_DIR"] = str(tmp_path_factory.mktemp("mg-test-data"))
+    os.environ.pop("MEMOGARDEN_SOIL_DB", None)
+    os.environ.pop("MEMOGARDEN_CORE_DB", None)
+    os.environ.pop("DATABASE_PATH", None)
+    yield
+    os.environ.pop("MEMOGARDEN_DATA_DIR", None)
+
+
 @pytest.fixture(autouse=True)
-def clean_database_before_tests():
+def clean_database_before_tests(pinned_db_env):
     """Clean database before each test module to ensure isolation.
 
     This ensures that data from previous test runs doesn't interfere.

@@ -51,15 +51,22 @@ class TestRuntimeContext:
         assert ctx.log_dir is None
         assert ctx.signal_method == "none"
 
-    def test_runtime_context_get_db_path(self):
-        """Test RuntimeContext.get_db_path() returns correct paths."""
+    def test_runtime_context_get_db_path(self, monkeypatch):
+        """Test RuntimeContext.get_db_path() delegates to the canonical resolver.
+
+        Before memogarden-system#7 this method applied the verb default
+        (data_dir/{db_name}.db) and ignored the env chain — greenfield
+        init then landed on different files than the runtime reads.
+        """
+        for var in ("MEMOGARDEN_DATA_DIR", "MEMOGARDEN_SOIL_DB", "MEMOGARDEN_CORE_DB"):
+            monkeypatch.delenv(var, raising=False)
         ctx = resolve_context("serve")
 
         soil_path = ctx.get_db_path("soil")
         core_path = ctx.get_db_path("core")
 
-        assert soil_path == Path("/var/lib/memogarden/soil.db")
-        assert core_path == Path("/var/lib/memogarden/core.db")
+        assert soil_path == get_db_path("soil")
+        assert core_path == get_db_path("core")
 
     def test_runtime_context_get_config_path(self):
         """Test RuntimeContext.get_config_path() returns correct path."""
@@ -301,32 +308,56 @@ class TestResourceProfile:
 # ============================================================================
 
 class TestPathResolution:
-    """Tests for path resolution using RuntimeContext."""
+    """Tests for path resolution using RuntimeContext.
 
-    def test_get_db_path_with_context_serve(self):
-        """Test get_db_path() with serve context."""
+    RuntimeContext.get_db_path delegates to the module-level get_db_path
+    (memogarden-system#7): database paths follow the RFC-004 env chain
+    with a cwd fallback, not the verb default — verbs govern config and
+    log locations only.
+    """
+
+    def test_get_db_path_with_context_serve(self, monkeypatch):
+        """Test get_db_path() with serve context resolves via the env chain."""
+        for var in ("MEMOGARDEN_DATA_DIR", "MEMOGARDEN_SOIL_DB", "MEMOGARDEN_CORE_DB"):
+            monkeypatch.delenv(var, raising=False)
         ctx = resolve_context("serve")
         soil_path = ctx.get_db_path("soil")
         core_path = ctx.get_db_path("core")
 
-        assert soil_path == Path("/var/lib/memogarden/soil.db")
-        assert core_path == Path("/var/lib/memogarden/core.db")
+        assert soil_path == get_db_path("soil")
+        assert core_path == get_db_path("core")
+        # cwd fallback (INV-PKG-002) — not the /var/lib verb default
+        assert soil_path == Path("./soil.db")
 
-    def test_get_db_path_with_context_run(self):
-        """Test get_db_path() with run context."""
+    def test_get_db_path_with_context_run(self, monkeypatch):
+        """Test get_db_path() with run context resolves via the env chain."""
+        for var in ("MEMOGARDEN_DATA_DIR", "MEMOGARDEN_SOIL_DB", "MEMOGARDEN_CORE_DB"):
+            monkeypatch.delenv(var, raising=False)
         ctx = resolve_context("run")
         soil_path = ctx.get_db_path("soil")
         core_path = ctx.get_db_path("core")
 
-        expected_data_dir = Path.home() / ".local/share/memogarden"
-        assert soil_path == expected_data_dir / "soil.db"
-        assert core_path == expected_data_dir / "core.db"
+        assert soil_path == get_db_path("soil")
+        assert core_path == get_db_path("core")
 
-    def test_get_db_path_with_context_deploy(self):
-        """Test get_db_path() with deploy context."""
+    def test_get_db_path_with_context_deploy(self, monkeypatch):
+        """Test get_db_path() with deploy context resolves via the env chain."""
+        for var in ("MEMOGARDEN_DATA_DIR", "MEMOGARDEN_SOIL_DB", "MEMOGARDEN_CORE_DB"):
+            monkeypatch.delenv(var, raising=False)
         ctx = resolve_context("deploy")
         soil_path = ctx.get_db_path("soil")
         core_path = ctx.get_db_path("core")
 
-        assert soil_path == Path("/data/soil.db")
-        assert core_path == Path("/data/core.db")
+        assert soil_path == get_db_path("soil")
+        assert core_path == get_db_path("core")
+
+    def test_get_db_path_env_overrides_beat_any_verb(self, tmp_path, monkeypatch):
+        """MEMOGARDEN_DATA_DIR beats serve/deploy verb defaults for db paths."""
+        monkeypatch.setenv("MEMOGARDEN_DATA_DIR", str(tmp_path))
+        monkeypatch.delenv("MEMOGARDEN_SOIL_DB", raising=False)
+        monkeypatch.delenv("MEMOGARDEN_CORE_DB", raising=False)
+
+        for verb in ("serve", "run", "deploy"):
+            ctx = resolve_context(verb)
+            assert ctx.get_db_path("soil") == tmp_path / "soil.db"
+            assert ctx.get_db_path("core") == tmp_path / "core.db"
