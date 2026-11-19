@@ -16,6 +16,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # The SQL schemas live in the memogarden/memogarden submodule (pinned
+      # to schema-release tags) — get_sql_schema() resolves through it, so
+      # tests cannot even import the conftest without it. memogarden/
+      # memogarden is public, so the default token clones it. Init must be
+      # explicit and path-scoped: actions/checkout's submodules input is
+      # always --recursive, and the schemas repo carries unregistered
+      # gitlinks (app-budget, hacm, mars, ...) that break recursion.
+      - name: Init schemas submodule
+        run: git submodule update --init system/schemas/memogarden
+
       # poetry path dependency: memogarden-utils = {path = "../memogarden-utils"}.
       # checkout places it under $GITHUB_WORKSPACE (the repo dir); move it up
       # one level so ../memogarden-utils resolves.
