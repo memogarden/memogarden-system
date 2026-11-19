@@ -1,0 +1,3 @@
+[submodule "system/schemas/memogarden"]
+	path = system/schemas/memogarden
+	url = https://github.com/memogarden/memogarden.git

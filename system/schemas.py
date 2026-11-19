@@ -1,7 +1,9 @@
 """Schema access utilities for MemoGarden System.
 
 This module provides runtime access to SQL schemas and JSON type schemas
-for both Soil and Core layers.
+for both Soil and Core layers. Since 2026-11-19 the JSON+SQL schemas are
+served from the memogarden/memogarden submodule mount (pinned to schema
+release tags); the package keeps no local copies.
 
 RFC-004 v2 Invariants:
 - INV-PKG-004: Try importlib.resources first (bundled package)
@@ -44,15 +46,21 @@ except ImportError:
 VALID_LAYERS = {"soil", "core"}
 VALID_CATEGORIES = {"facts", "entities"}
 
-# Schema file paths (relative to package root)
+# Schema file paths (relative to package root). Since 2026-11-19 the
+# schemas live in the memogarden/memogarden repo, mounted as a git
+# submodule at system/schemas/memogarden and pinned to schema-release
+# tags (schemas-v1 was the first) — single source of truth, versioned
+# independently of the package. The package keeps NO local copies.
+# (RFC-004 INV-PKG-004/005 still hold: the mount is bundled via the
+# pyproject include globs; the file fallback reads it from disk.)
 SQL_SCHEMA_PATHS = {
-    "soil": "system/schemas/sql/soil.sql",
-    "core": "system/schemas/sql/core.sql",
+    "soil": "system/schemas/memogarden/schemas/sql/soil.sql",
+    "core": "system/schemas/memogarden/schemas/sql/core.sql",
 }
 
 TYPE_SCHEMA_DIR = {
-    "facts": "system/schemas/types/facts",
-    "entities": "system/schemas/types/entities",
+    "facts": "system/schemas/memogarden/schemas/types/facts",
+    "entities": "system/schemas/memogarden/schemas/types/entities",
 }
 
 
@@ -94,9 +102,11 @@ def get_sql_schema(layer: str) -> str:
             # Fall through to file reading
             pass
 
-    # Fall back to file reading (development mode)
-    # Try system package location first, then root location
+    # Fall back to file reading (development mode): the submodule mount
+    # first (the single source since 2026-11-19), then the legacy package
+    # and dev-workspace locations.
     file_locations = [
+        Path(__file__).parent / "schemas" / "memogarden" / "schemas" / "sql" / f"{layer}.sql",
         Path(__file__).parent / "schemas" / "sql" / f"{layer}.sql",
         Path(__file__).parent.parent.parent / "schemas" / "sql" / f"{layer}.sql",
     ]
@@ -161,6 +171,7 @@ def get_type_schema(category: str, type_name: str) -> dict:
 
     # Fall back to file reading (development mode)
     file_locations = [
+        Path(__file__).parent / "schemas" / "memogarden" / "schemas" / "types" / category / schema_filename,
         Path(__file__).parent / "schemas" / "types" / category / schema_filename,
         Path(__file__).parent.parent.parent / "schemas" / "types" / category / schema_filename,
     ]
@@ -227,6 +238,7 @@ def list_type_schemas(category: str) -> list[str]:
 
     # Fall back to file reading (development mode)
     file_locations = [
+        Path(__file__).parent / "schemas" / "memogarden" / "schemas" / "types" / category,
         Path(__file__).parent / "schemas" / "types" / category,
         Path(__file__).parent.parent / "schemas" / "types" / category,
     ]
