@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS _schema_metadata (
 );
 
 INSERT OR IGNORE INTO _schema_metadata VALUES
-    ('version', '20261114', datetime('now')),
+    ('version', '20261119', datetime('now')),
     ('base_schema', 'memogarden-core-base', datetime('now')),
     ('description', 'Core base tables only; type schemas in JSON', datetime('now')),
     ('epoch_date', '2020-01-01', datetime('now'));
@@ -127,6 +127,9 @@ CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 -- is attributed to. Unbound keys attribute to the owning username.
 -- grants (RFC-011 §4.3): operator-issued scope entry permissions,
 -- [{scope_uuid, granted_at, expires_at|null}]; [] = unscoped-only.
+-- capabilities (E3, RFC-013 ingestion register): restricted key classes —
+-- non-empty list = key may ONLY call endpoints covered by those
+-- capabilities; [] = unrestricted (all legacy keys unrestricted).
 CREATE TABLE IF NOT EXISTS api_keys (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -135,6 +138,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
     key_prefix TEXT NOT NULL,
     agent_entity_id TEXT REFERENCES entity(uuid),
     grants JSON NOT NULL DEFAULT '[]',
+    capabilities JSON NOT NULL DEFAULT '[]',
     expires_at TEXT,
     created_at TEXT NOT NULL,
     last_seen TEXT,
