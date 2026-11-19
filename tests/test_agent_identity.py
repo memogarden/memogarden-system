@@ -226,6 +226,6 @@ def test_agent_entity_type_schema_loads():
     assert set(required) == {"label", "owner"}
 
 
-def test_expected_version_is_20261119():
+def test_expected_version_is_20261120():
     """Guard against accidental version regression in this branch."""
-    assert EXPECTED_SCHEMA_VERSION == "20261119"
+    assert EXPECTED_SCHEMA_VERSION == "20261120"
