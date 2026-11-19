@@ -435,7 +435,9 @@ class EntityOperations:
         self,
         query: str,
         coverage: str = "content",
-        limit: int = 20
+        limit: int = 20,
+        allowed_scopes: list[str] | None = None,
+        scope_uuid: str | None = None,
     ) -> list[dict]:
         """Search entities by fuzzy text matching.
 
@@ -446,6 +448,11 @@ class EntityOperations:
             query: Search string (will be wrapped with % wildcards)
             coverage: Coverage level - "names" (type only), "content" (type+data), "full" (all fields)
             limit: Maximum results to return
+            allowed_scopes: RFC-011 §4.9(3) pre-match enforcement — plain
+                scope uuids the requester may see (active frame + public
+                visibility); None = unrestricted. Scoped items outside the
+                set never become matches.
+            scope_uuid: Convenience `scope` refinement (RFC-005 v8).
 
         Returns:
             List of matching entity dicts with parsed JSON data
@@ -475,6 +482,32 @@ class EntityOperations:
             # Search all searchable fields (entity table has no metadata column)
             where_conditions.append("(type LIKE ? OR data LIKE ?)")
             params.extend([search_pattern, search_pattern])
+
+        # RFC-011 §4.9(3): scope enforcement PRE-MATCH (RFC-005 v8) —
+        # entity labels live in data.scopes; scoped items outside the
+        # allowed set never become matches. Applied before ORDER/LIMIT on
+        # every coverage level. allowed_scopes None = unrestricted.
+        if allowed_scopes is not None:
+            if allowed_scopes:
+                placeholders = ", ".join("?" for _ in allowed_scopes)
+                where_conditions.append(
+                    "(NOT EXISTS (SELECT 1 FROM json_each(data, '$.scopes')) "
+                    f"OR EXISTS (SELECT 1 FROM json_each(data, '$.scopes') "
+                    f"WHERE value IN ({placeholders})))"
+                )
+                params.extend(allowed_scopes)
+            else:
+                # Empty allowed set (no frame, no public scopes): only
+                # unlabeled items are visible (SG-1).
+                where_conditions.append(
+                    "NOT EXISTS (SELECT 1 FROM json_each(data, '$.scopes'))"
+                )
+        if scope_uuid is not None:
+            where_conditions.append(
+                "EXISTS (SELECT 1 FROM json_each(data, '$.scopes') "
+                "WHERE value IN (?, ?))"
+            )
+            params.extend([scope_uuid, f"core_{scope_uuid}"])
 
         # Build query
         sql = f"""

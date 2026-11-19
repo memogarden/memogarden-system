@@ -333,7 +333,9 @@ class Soil:
         self,
         query: str,
         coverage: str = "content",
-        limit: int = 20
+        limit: int = 20,
+        allowed_scopes: list[str] | None = None,
+        scope_uuid: str | None = None,
     ) -> list[sqlite3.Row]:
         """Search items (facts) by fuzzy text matching.
 
@@ -344,6 +346,13 @@ class Soil:
             query: Search string (will be wrapped with % wildcards)
             coverage: Coverage level - "names" (_type only), "content" (_type+data), "full" (all fields)
             limit: Maximum results to return
+            allowed_scopes: RFC-011 §4.9(3) pre-match enforcement — plain
+                scope uuids the requester may see (active frame + public
+                visibility); None = unrestricted. Scoped items outside the
+                set never become matches (excluded before LIKE evaluation,
+                ORDER, and LIMIT).
+            scope_uuid: Convenience `scope` refinement (RFC-005 v8) —
+                restrict to one scope uuid; enforcement is independent.
 
         Returns:
             List of matching fact rows (raw database rows, not Fact objects)
@@ -371,6 +380,37 @@ class Soil:
             # Search all fields
             where_conditions.append("(_type LIKE ? OR data LIKE ? OR metadata LIKE ?)")
             params.extend([search_pattern, search_pattern, search_pattern])
+
+        # RFC-011 §4.9(3): scope enforcement PRE-MATCH — scoped items outside
+        # the allowed set never become matches (a hit itself is a leak, and
+        # a scoped hit displacing a real one corrupts pagination). Applied
+        # here at WHERE level, before ORDER/LIMIT, on every coverage level.
+        # allowed_scopes None = unrestricted (flag-off / sovereign callers);
+        # items are visible iff unlabeled (SG-1) or ANY label is allowed
+        # (active frame or public visibility — most permissive wins).
+        if allowed_scopes is not None:
+            if allowed_scopes:
+                placeholders = ", ".join("?" for _ in allowed_scopes)
+                where_conditions.append(
+                    "(NOT EXISTS (SELECT 1 FROM json_each(metadata, '$.scopes')) "
+                    f"OR EXISTS (SELECT 1 FROM json_each(metadata, '$.scopes') "
+                    f"WHERE value IN ({placeholders})))"
+                )
+                params.extend(allowed_scopes)
+            else:
+                # Empty allowed set (no frame, no public scopes): only
+                # unlabeled items are visible (SG-1).
+                where_conditions.append(
+                    "NOT EXISTS (SELECT 1 FROM json_each(metadata, '$.scopes'))"
+                )
+        # Convenience `scope` refinement (RFC-005 v8) — narrows results to
+        # one scope; enforcement is automatic and independent of it.
+        if scope_uuid is not None:
+            where_conditions.append(
+                "EXISTS (SELECT 1 FROM json_each(metadata, '$.scopes') "
+                "WHERE value IN (?, ?))"
+            )
+            params.extend([scope_uuid, f"core_{scope_uuid}"])
 
         # Build query
         sql = f"""
