@@ -441,6 +441,23 @@ class TestProviderScopePolicyColumn:
                 key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL
             );
             INSERT INTO _schema_metadata VALUES ('version', '20261109', datetime('now'));
+            -- api_keys: created by migrate_20251223_to_20251229, so every real
+            -- 20261109 database has it — the chain walk to EXPECTED ALTERs it
+            -- (E3 capabilities). Hand-built fixtures carry what the chain
+            -- guarantees, not just the table under test.
+            CREATE TABLE api_keys (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                key_hash TEXT NOT NULL,
+                key_prefix TEXT NOT NULL,
+                agent_entity_id TEXT REFERENCES entity(uuid),
+                grants JSON NOT NULL DEFAULT '[]',
+                expires_at TEXT,
+                created_at TEXT NOT NULL,
+                last_seen TEXT,
+                revoked_at TEXT
+            );
             CREATE TABLE providers (
                 name TEXT PRIMARY KEY,
                 module TEXT NOT NULL,

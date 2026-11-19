@@ -100,6 +100,22 @@ class TestMigrationFrom20261113:
                 key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL
             );
             INSERT INTO _schema_metadata VALUES ('version', '20261113', datetime('now'));
+            -- api_keys: created by migrate_20251223_to_20251229, so every real
+            -- 20261113 database has it — the chain walk to 20261119 ALTERs it.
+            -- Hand-built fixtures must carry what the chain guarantees.
+            CREATE TABLE api_keys (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                key_hash TEXT NOT NULL,
+                key_prefix TEXT NOT NULL,
+                agent_entity_id TEXT REFERENCES entity(uuid),
+                grants JSON NOT NULL DEFAULT '[]',
+                expires_at TEXT,
+                created_at TEXT NOT NULL,
+                last_seen TEXT,
+                revoked_at TEXT
+            );
             CREATE TABLE providers (
                 name TEXT PRIMARY KEY,
                 module TEXT NOT NULL,
