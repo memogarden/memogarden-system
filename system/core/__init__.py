@@ -490,9 +490,12 @@ def init_db():
 # ============================================================================
 
 # (slug, label) — ordinary restricted Scope entities, identified by label.
+# "Personal" (renamed from "Private", 2026-11-19): the word "private" is
+# reserved for the Scope.visibility axis (RFC-011 visibility addendum) —
+# scopes name domains, not visibility.
 BUILTIN_SCOPES = (
     ("triage", "Triage / Untrusted"),
-    ("private", "Private"),
+    ("personal", "Personal"),
 )
 
 
@@ -520,10 +523,200 @@ def ensure_builtin_scopes() -> list[str]:
             if row is None:
                 uuid = core.entity.create(
                     entity_type="Scope",
-                    data={"label": label, "active_participants": [], "artifact_uuids": []},
+                    data={
+                        "label": label,
+                        "visibility": "private",
+                        "active_participants": [],
+                        "artifact_uuids": [],
+                    },
                 )
                 created.append(uuid)
     return created
+
+
+def migrate_private_scope_rename(soil_db_path: str | None = None) -> dict:
+    """Rename migration: builtin scope "Private" -> "Personal" (2026-11-19).
+
+    The builtin "Private" scope predates the visibility work: the word
+    "private" is reserved for the Scope.visibility axis (RFC-011 visibility
+    addendum), so the builtin is renamed to "Personal". Immutable memory:
+    the old Scope entity is superseded, never rewritten — seeding creates
+    "Personal" as a new entity and this migration moves every reference
+    onto the new UUID:
+
+    - api_keys.grants (JSON array of {scope_uuid, ...})
+    - entity data.scopes arrays (entities carry labels in data.scopes)
+    - context_frame.active_scope
+    - Soil item metadata.scopes arrays
+    - providers.scope_policy JSON ("private" alias/label/uuid values)
+
+    Also stamps `visibility: "private"` onto every live Scope whose data
+    predates the attribute (restricted-by-default), and supersedes the old
+    "Private" entity for the audit trail.
+
+    Idempotent: acts only while an ACTIVE (non-superseded) "Private" scope
+    exists — fresh and already-migrated databases no-op. Safe to call at
+    every startup (invoked from init_system after both DBs initialize).
+
+    Returns:
+        Summary dict for the init log ({"ran": False, ...} when no-op).
+    """
+    import json
+
+    summary = {
+        "ran": False,
+        "old_uuid": None,
+        "new_uuid": None,
+        "grants_updated": 0,
+        "entities_updated": 0,
+        "frames_updated": 0,
+        "items_updated": 0,
+        "policies_updated": 0,
+        "visibility_stamped": 0,
+    }
+
+    def _swap_uuid_refs(text: str, old: str, new: str) -> str:
+        """Replace quoted uuid refs (bare and core_-prefixed forms) in JSON text."""
+        return text.replace(f'"{old}"', f'"{new}"').replace(
+            f'"core_{old}"', f'"core_{new}"'
+        )
+
+    with get_core() as core:
+        old_row = core._conn.execute(
+            "SELECT uuid FROM entity WHERE type = 'Scope' "
+            "AND json_extract(data, '$.label') = 'Private' "
+            "AND superseded_by IS NULL"
+        ).fetchone()
+        if old_row is None:
+            return summary  # fresh or already-migrated database
+        old_uuid = old_row["uuid"]
+
+        new_row = core._conn.execute(
+            "SELECT uuid FROM entity WHERE type = 'Scope' "
+            "AND json_extract(data, '$.label') = 'Personal' "
+            "AND superseded_by IS NULL"
+        ).fetchone()
+        if new_row is None:
+            # ensure_builtin_scopes seeds "Personal" first; create
+            # defensively if this migration ever runs before seeding.
+            new_uuid = core.entity.create(
+                entity_type="Scope",
+                data={
+                    "label": "Personal",
+                    "visibility": "private",
+                    "active_participants": [],
+                    "artifact_uuids": [],
+                },
+            )
+        else:
+            new_uuid = new_row["uuid"]
+        summary.update(ran=True, old_uuid=old_uuid, new_uuid=new_uuid)
+
+        # 1. api_keys.grants — entry permissions re-point to the new scope.
+        key_rows = core._conn.execute(
+            "SELECT id, grants FROM api_keys WHERE grants LIKE ?",
+            (f'%{old_uuid}%',),
+        ).fetchall()
+        for row in key_rows:
+            new_text = _swap_uuid_refs(row["grants"] or "[]", old_uuid, new_uuid)
+            if new_text != (row["grants"] or "[]"):
+                core._conn.execute(
+                    "UPDATE api_keys SET grants = ? WHERE id = ?",
+                    (new_text, row["id"]),
+                )
+                summary["grants_updated"] += 1
+
+        # 2. entity data.scopes — entities carry labels in data.scopes.
+        ent_rows = core._conn.execute(
+            "SELECT uuid, data FROM entity WHERE type != 'Scope' "
+            "AND EXISTS (SELECT 1 FROM json_each(data, '$.scopes') "
+            "WHERE value = ?)",
+            (old_uuid,),
+        ).fetchall()
+        for row in ent_rows:
+            data = json.loads(row["data"])
+            scopes = data.get("scopes")
+            if not isinstance(scopes, list):
+                continue  # storage always writes arrays; skip stray shapes
+            data["scopes"] = [new_uuid if s == old_uuid else s for s in scopes]
+            core.entity.update_data(row["uuid"], data)
+            summary["entities_updated"] += 1
+
+        # 3. context_frame.active_scope — frames inside the old scope.
+        cur = core._conn.execute(
+            "UPDATE context_frame SET active_scope = ? WHERE active_scope = ?",
+            (new_uuid, old_uuid),
+        )
+        summary["frames_updated"] = cur.rowcount
+
+        # 4. providers.scope_policy — rewrite legacy alias/label/uuid refs.
+        policy_rows = core._conn.execute(
+            "SELECT name, scope_policy FROM providers WHERE scope_policy IS NOT NULL"
+        ).fetchall()
+        for row in policy_rows:
+            try:
+                policy = json.loads(row["scope_policy"])
+            except (ValueError, TypeError):
+                continue
+            aliases = {"private", "Private", old_uuid, f"core_{old_uuid}"}
+            changed = False
+            for rule in policy.get("rules") or []:
+                if rule.get("scope") in aliases:
+                    rule["scope"] = "personal"
+                    changed = True
+            if policy.get("default") in aliases:
+                policy["default"] = "personal"
+                changed = True
+            if changed:
+                core._conn.execute(
+                    "UPDATE providers SET scope_policy = ? WHERE name = ?",
+                    (json.dumps(policy), row["name"]),
+                )
+                summary["policies_updated"] += 1
+
+        # 5. Stamp visibility onto scopes that predate the attribute.
+        stamp_rows = core._conn.execute(
+            "SELECT uuid, data FROM entity WHERE type = 'Scope' "
+            "AND superseded_by IS NULL "
+            "AND json_extract(data, '$.visibility') IS NULL"
+        ).fetchall()
+        for row in stamp_rows:
+            data = json.loads(row["data"])
+            data["visibility"] = "private"
+            core.entity.update_data(row["uuid"], data)
+            summary["visibility_stamped"] += 1
+
+    # 6. Soil items — metadata.scopes label arrays (metadata sits outside
+    # the integrity hash, so in-place repair is legal here; RFC-011 §4.2).
+    # Runs BEFORE the supersede: while the old scope is still active, any
+    # crash simply re-runs the whole migration on next startup (every step
+    # above is reference-targeted and idempotent). The supersede below is
+    # the migration's point of no return.
+    from system.soil.database import get_soil
+
+    with get_soil(soil_db_path) as soil:
+        conn = soil._get_connection()
+        item_rows = conn.execute(
+            "SELECT uuid, metadata FROM item "
+            "WHERE EXISTS (SELECT 1 FROM json_each(metadata, '$.scopes') "
+            "WHERE value = ?)",
+            (old_uuid,),
+        ).fetchall()
+        for row in item_rows:
+            new_text = _swap_uuid_refs(row["metadata"] or "{}", old_uuid, new_uuid)
+            conn.execute(
+                "UPDATE item SET metadata = ? WHERE uuid = ?",
+                (new_text, row["uuid"]),
+            )
+            summary["items_updated"] += 1
+        conn.commit()
+
+    # 7. Supersede the old "Private" scope (audit trail — immutable
+    # memory: the entity persists, references moved to "Personal").
+    with get_core() as core:
+        core.entity.supersede(old_uuid, new_uuid)
+
+    return summary
 
 
 # ============================================================================
@@ -587,12 +780,25 @@ def init_system(verb: str = "run") -> dict:
     # Initialize Core database (creates if missing, applies migrations)
     init_db()
 
-    # Provision builtin scopes (RFC-011 §4.1: triage, private) — idempotent
+    # Provision builtin scopes (RFC-011 §4.1: triage, personal) — idempotent
     ensure_builtin_scopes()
 
     # Initialize Soil database (creates if missing, applies migrations)
     with get_soil(str(soil_db_path)) as soil:
         soil.init_schema()
+
+    # Rename migration: builtin scope "Private" -> "Personal" (2026-11-19,
+    # RFC-011 visibility addendum) — runs after both DBs initialize since it
+    # moves references across Core (grants, frames, policies) and Soil (items).
+    scope_rename = migrate_private_scope_rename(str(soil_db_path))
+    if scope_rename.get("ran"):
+        print(
+            f"[init] scope rename: Private {scope_rename['old_uuid']} -> "
+            f"Personal {scope_rename['new_uuid']} (grants={scope_rename['grants_updated']}, "
+            f"entities={scope_rename['entities_updated']}, frames={scope_rename['frames_updated']}, "
+            f"items={scope_rename['items_updated']}, policies={scope_rename['policies_updated']}, "
+            f"visibility_stamped={scope_rename['visibility_stamped']})"
+        )
 
     # Run consistency checks (RFC-008)
     coordinator = TransactionCoordinator(
@@ -612,4 +818,5 @@ def init_system(verb: str = "run") -> dict:
         'core_db_path': str(core_db_path),
         'has_admin_user': has_admin,
         'databases_existed': databases_existed,
+        'scope_rename': scope_rename,
     }

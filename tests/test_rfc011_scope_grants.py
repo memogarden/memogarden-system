@@ -3,7 +3,8 @@
 Covers:
 - ContextFrame singular active_scope: enter/leave/switch semantics (INV-11a)
 - Idempotent re-enter, mismatched-leave rejection, focus as no-op alias
-- Builtin scope provisioning (triage, private) — idempotent (RFC-011 §4.1)
+- Builtin scope provisioning (triage, personal) — idempotent (RFC-011 §4.1)
+- The 2026-11-19 "Private" -> "Personal" rename migration (visibility addendum)
 - The 20261106 -> 20261109 migration fold rule (live-data safety)
 """
 
@@ -16,6 +17,7 @@ from system.core import (
     _apply_migration,
     ensure_builtin_scopes,
     get_core,
+    migrate_private_scope_rename,
 )
 from system.exceptions import ValidationError
 
@@ -80,13 +82,13 @@ class TestExclusiveActivation:
 
 
 class TestBuiltinScopes:
-    """RFC-011 §4.1: triage and private provisioned idempotently.
+    """RFC-011 §4.1: triage and personal provisioned idempotently.
 
     Uses its own get_core() connections (not the db_core fixture, which
     rolls back) so the seeded entities persist within the module run.
     """
 
-    def test_provision_creates_triage_and_private(self):
+    def test_provision_creates_triage_and_personal(self):
         created = ensure_builtin_scopes()
         assert len(created) == 2
 
@@ -101,10 +103,211 @@ class TestBuiltinScopes:
             rows = core._conn.execute(
                 "SELECT data FROM entity WHERE type = 'Scope' "
                 "AND json_extract(data, '$.label') IN "
-                "('Triage / Untrusted', 'Private')"
+                "('Triage / Untrusted', 'Personal')"
             ).fetchall()
-            labels = {json.loads(row["data"])["label"] for row in rows}
-            assert labels == {"Triage / Untrusted", "Private"}
+            data = [json.loads(row["data"]) for row in rows]
+            labels = {d["label"] for d in data}
+            assert labels == {"Triage / Untrusted", "Personal"}
+            # Builtins are restricted-by-default (visibility addendum).
+            assert all(d["visibility"] == "private" for d in data)
+
+
+class TestPrivateScopeRenameMigration:
+    """2026-11-19 rename migration: builtin "Private" -> "Personal".
+
+    Immutable memory: the rename lands as a NEW Scope entity; the
+    migration moves every reference onto the new UUID (key grants,
+    entity data.scopes, context frames, Soil item labels, provider
+    policies), stamps the visibility attribute onto scopes that predate
+    it, and supersedes the old entity for the audit trail.
+
+    Uses its own get_core()/get_soil() connections (persisting, not the
+    rolling db_core fixture), mirroring the startup order:
+    ensure_builtin_scopes() -> migrate_private_scope_rename().
+    """
+
+    def _seed_legacy_state(self):
+        """Recreate the pre-rename live shape: one active "Private" scope
+        every reference site points at."""
+        import uuid as uuid_mod
+
+        from system.host.environment import get_db_path
+        from system.soil import get_soil
+        from system.soil.fact import Fact
+
+        with get_core() as core:
+            # The autouse fixture wipes entity/item only — clear the
+            # auxiliary tables this helper writes so it can re-run.
+            core._conn.execute("DELETE FROM providers WHERE name = 'rnmp'")
+            core._conn.execute("DELETE FROM api_keys WHERE name = 'legacy-key'")
+            core._conn.execute("DELETE FROM users WHERE username = 'rnm-op'")
+            core._conn.execute(
+                "DELETE FROM context_frame WHERE participant = 'user-rnm'"
+            )
+            old_uuid = core.entity.create(
+                entity_type="Scope",
+                data={"label": "Private", "active_participants": [], "artifact_uuids": []},
+            )
+            # api_keys.id/user_id are entity-FKs — create the identity rows.
+            user_entity = core.entity.create(
+                entity_type="Operator", data={"label": "rnm-operator"}
+            )
+            key_entity = core.entity.create(
+                entity_type="ApiKey", data={"label": "legacy-key"}
+            )
+            core._conn.execute(
+                "INSERT INTO users (id, username, password_hash, is_admin, created_at) "
+                "VALUES (?, 'rnm-op', 'hash-rnm', 1, datetime('now'))",
+                (user_entity,),
+            )
+            core._conn.execute(
+                "INSERT INTO api_keys (id, user_id, name, key_hash, key_prefix, grants, created_at) "
+                "VALUES (?, ?, 'legacy-key', 'hash-rnm', 'mg_sk_rnm', ?, datetime('now'))",
+                (key_entity, user_entity, json.dumps([{"scope_uuid": old_uuid, "granted_at": "2026-11-01T00:00:00"}])),
+            )
+            # A second key holding the core_-prefixed form of the same ref —
+            # the migration must swap both forms (bare -> bare, prefixed -> prefixed).
+            prefixed_key_entity = core.entity.create(
+                entity_type="ApiKey", data={"label": "legacy-key-prefixed"}
+            )
+            core._conn.execute(
+                "INSERT INTO api_keys (id, user_id, name, key_hash, key_prefix, grants, created_at) "
+                "VALUES (?, ?, 'legacy-key-prefixed', 'hash-rnm-p', 'mg_sk_rnmp', ?, datetime('now'))",
+                (prefixed_key_entity, user_entity, json.dumps([{"scope_uuid": f"core_{old_uuid}", "granted_at": "2026-11-01T00:00:00"}])),
+            )
+            labeled_entity = core.entity.create(
+                entity_type="Task",
+                data={"title": "labeled", "scopes": [old_uuid]},
+            )
+            frame = core.context.get_context_frame("user-rnm", "operator")
+            core.context.enter_scope(frame, old_uuid)
+            core._conn.execute(
+                "INSERT INTO providers (name, module, class, registered_at, scope_policy) "
+                "VALUES ('rnmp', 'rnmp.provider', 'RnmpProvider', datetime('now'), ?)",
+                (json.dumps(
+                    {
+                        "rules": [{"match": {"account": "a@b.c"}, "scope": "private"}],
+                        "default": "private",
+                    }
+                ),),
+            )
+            core._conn.commit()
+
+        with get_soil(str(get_db_path("soil"))) as soil:
+            fact = Fact(
+                uuid=str(uuid_mod.uuid4()),
+                _type="Email",
+                realized_at="2026-11-01T00:00:00",
+                canonical_at="2026-11-01T00:00:00",
+                data={"subject": "labeled"},
+                metadata={"scopes": [old_uuid]},
+            )
+            soil.create_fact(fact)
+            soil._get_connection().commit()
+
+        return old_uuid, labeled_entity
+
+    def test_rename_migrates_every_reference_site(self):
+        from system.host.environment import get_db_path
+        from system.soil import get_soil
+
+        old_uuid, _labeled_entity = self._seed_legacy_state()
+
+        # Startup order: seeding creates "Personal" first, then the
+        # migration moves the references across.
+        created = ensure_builtin_scopes()
+        assert len(created) == 2  # Triage + Personal on this wiped DB
+        summary = migrate_private_scope_rename(str(get_db_path("soil")))
+        assert summary["ran"] is True
+        new_uuid = summary["new_uuid"]
+        assert new_uuid and new_uuid != old_uuid
+
+        with get_core() as core:
+            # Grants re-point to the new scope — bare refs stay bare.
+            grants = json.loads(
+                core._conn.execute(
+                    "SELECT grants FROM api_keys WHERE name = 'legacy-key'"
+                ).fetchone()["grants"]
+            )
+            assert grants[0]["scope_uuid"] == new_uuid
+            # Prefixed refs swap prefixed -> prefixed.
+            prefixed = json.loads(
+                core._conn.execute(
+                    "SELECT grants FROM api_keys WHERE name = 'legacy-key-prefixed'"
+                ).fetchone()["grants"]
+            )
+            assert prefixed[0]["scope_uuid"] == f"core_{new_uuid}"
+
+            # Entity labels re-point.
+            ent_data = json.loads(
+                core._conn.execute(
+                    "SELECT data FROM entity WHERE uuid = ?", (_labeled_entity,)
+                ).fetchone()["data"]
+            )
+            assert ent_data["scopes"] == [new_uuid]
+
+            # Context frames re-point.
+            frame_scope = core._conn.execute(
+                "SELECT active_scope FROM context_frame WHERE participant = 'user-rnm'"
+            ).fetchone()["active_scope"]
+            assert frame_scope == new_uuid
+
+            # Provider policies lose the legacy alias.
+            policy = json.loads(
+                core._conn.execute(
+                    "SELECT scope_policy FROM providers WHERE name = 'rnmp'"
+                ).fetchone()["scope_policy"]
+            )
+            assert policy["rules"][0]["scope"] == "personal"
+            assert policy["default"] == "personal"
+
+            # Visibility stamped onto scopes that predate the attribute.
+            scope_rows = core._conn.execute(
+                "SELECT data FROM entity WHERE type = 'Scope' AND superseded_by IS NULL"
+            ).fetchall()
+            visibility = {
+                json.loads(r["data"])["label"]: json.loads(r["data"]).get("visibility")
+                for r in scope_rows
+            }
+            assert visibility["Triage / Untrusted"] == "private"
+            assert visibility["Personal"] == "private"
+
+            # Old scope superseded onto the new one (immutable memory).
+            superseded_by = core._conn.execute(
+                "SELECT superseded_by FROM entity WHERE uuid = ?", (old_uuid,)
+            ).fetchone()["superseded_by"]
+            assert superseded_by == new_uuid
+
+        # Soil item labels re-point.
+        with get_soil(str(get_db_path("soil"))) as soil:
+            row = soil._get_connection().execute(
+                "SELECT metadata FROM item WHERE "
+                "json_extract(metadata, '$.scopes[0]') IS NOT NULL"
+            ).fetchone()
+            assert json.loads(row["metadata"])["scopes"] == [new_uuid]
+
+    def test_rename_is_idempotent(self):
+        from system.host.environment import get_db_path
+
+        self._seed_legacy_state()
+        ensure_builtin_scopes()
+        first = migrate_private_scope_rename(str(get_db_path("soil")))
+        assert first["ran"] is True
+
+        # Second startup: old scope is superseded -> migration no-ops.
+        second = migrate_private_scope_rename(str(get_db_path("soil")))
+        assert second["ran"] is False
+        # Re-seeding is a no-op too: "Personal" already exists.
+        assert ensure_builtin_scopes() == []
+
+    def test_fresh_database_never_migrates(self):
+        from system.host.environment import get_db_path
+
+        # Wiped DB, no legacy "Private" anywhere: seeding alone suffices.
+        created = ensure_builtin_scopes()
+        assert len(created) == 2
+        summary = migrate_private_scope_rename(str(get_db_path("soil")))
+        assert summary["ran"] is False
 
 
 class TestMigration20261109:
