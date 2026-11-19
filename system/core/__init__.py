@@ -478,7 +478,7 @@ def init_db():
         except FileNotFoundError as e:
             raise RuntimeError(
                 f"Failed to load Core schema: {e}\n"
-                "Ensure schemas are bundled in system/schemas/sql/"
+                "Ensure the schemas submodule is initialized: git submodule update --init"
             ) from e
 
         db.executescript(schema_sql)
