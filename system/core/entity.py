@@ -182,6 +182,9 @@ class EntityOperations:
         """Mark entity as superseded by another entity.
 
         Updates the old entity's hash and version to reflect the supersession.
+        previous_hash records the pre-supersede hash value — the link chained
+        into the new hash — so the row stays recomputation-faithful
+        (RFC-008 v1.3, memogarden-system#6).
 
         Args:
             old_id: The UUID of the entity being superseded
@@ -220,9 +223,10 @@ class EntityOperations:
 
         self._conn.execute(
             """UPDATE entity
-               SET superseded_by = ?, superseded_at = ?, updated_at = ?, hash = ?, version = version + 1
+               SET superseded_by = ?, superseded_at = ?, updated_at = ?,
+                   hash = ?, previous_hash = ?, version = version + 1
                WHERE uuid = ?""",
-            (new_id, now, now, new_hash, old_id)
+            (new_id, now, now, new_hash, current["hash"], old_id)
         )
 
     def update_hash(self, entity_id: str) -> str:

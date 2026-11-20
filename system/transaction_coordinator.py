@@ -7,7 +7,7 @@ ARCHITECTURE:
 - Uses EXCLUSIVE locks on both databases for cross-DB operations
 - Commits Soil first (source of truth), then Core
 - Detects inconsistency when Soil commits but Core fails
-- Startup checks identify orphaned EntityDeltas and broken hash chains
+- Startup checks identify orphaned EntityDeltas and hash integrity violations
 
 TRANSACTION SEMANTICS (RFC-008):
 - Single-DB operations: Standard SQLite ACID
@@ -93,7 +93,7 @@ class TransactionCoordinator:
 
         Checks for:
         - Orphaned EntityDeltas (Soil committed, Core did not)
-        - Broken hash chains (previous_hash doesn't match)
+        - Hash integrity violations (stored hash != recomputation from row)
 
         Returns:
             SystemStatus indicating the health of the system
@@ -108,10 +108,10 @@ class TransactionCoordinator:
         if orphans:
             issues.append(f"Found {len(orphans)} orphaned EntityDeltas")
 
-        # Check for broken hash chains
-        broken_chains = self._find_broken_hash_chains()
-        if broken_chains:
-            issues.append(f"Found {len(broken_chains)} broken hash chains")
+        # Check entity hash integrity (per-row recomputation, RFC-008 v1.3)
+        violations = self._find_hash_integrity_violations()
+        if violations:
+            issues.append(f"Found {len(violations)} hash integrity violations")
 
         if issues:
             # Log issues but still return the status
@@ -119,7 +119,7 @@ class TransactionCoordinator:
             for issue in issues:
                 print(f"[TransactionCoordinator] WARNING: {issue}")
 
-            if broken_chains:
+            if violations:
                 # Database corruption detected
                 return SystemStatus.SAFE_MODE
             return SystemStatus.INCONSISTENT
@@ -191,45 +191,63 @@ class TransactionCoordinator:
             )
             return cursor.fetchone() is not None
 
-    def _find_broken_hash_chains(self) -> list[dict]:
+    def _find_hash_integrity_violations(self) -> list[dict]:
         """
-        Find entities with broken hash chains.
+        Find entities whose stored hash does not match recomputation.
 
-        A broken chain occurs when entity.previous_hash doesn't match
-        the hash of the entity it references.
+        RFC-008 (v1.3, memogarden-system#6): the entity hash is a PER-ROW
+        integrity seal over the entity's lifecycle fields, not a resolvable
+        cross-row chain. previous_hash stores the previous version's hash
+        value — the link that was chained into the current hash — which
+        in-place edits (Core.entity.update_hash / update_data, the sanctioned
+        edit path behind the Semantic API, triage relabels, scope stamping)
+        overwrite by design. It is therefore not resolvable against other
+        entity rows and never was a writer-established invariant: no writer
+        path produces a cross-entity previous_hash link.
+
+        What IS verifiable per row: hash == SHA256(lifecycle fields +
+        previous_hash), recomputed from the stored row. Tampering with any
+        hashed field — or with the hash itself — breaks the seal. Content
+        remains auditable through Soil facts and EntityDeltas (the hash
+        never covered entity.data; RFC-008 §"Hash chain safety").
 
         Returns:
-            List of broken chain dictionaries with uuid, previous_hash, expected_hash
+            List of violation dictionaries with uuid, type, issue
         """
-        broken = []
+        from utils.hash_chain import compute_entity_hash
+
+        violations = []
 
         with sqlite3.connect(str(self.core_db_path)) as conn:
             conn.row_factory = sqlite3.Row
 
-            # Find entities with non-NULL previous_hash
             cursor = conn.execute(
-                """SELECT uuid, previous_hash, hash, type, data, created_at
-                   FROM entity
-                   WHERE previous_hash IS NOT NULL"""
+                """SELECT uuid, type, hash, previous_hash,
+                          group_id, derived_from,
+                          superseded_by, superseded_at,
+                          created_at, updated_at
+                   FROM entity"""
             )
 
             for row in cursor.fetchall():
-                # Find the entity that should have this hash
-                prev_cursor = conn.execute(
-                    "SELECT uuid, hash FROM entity WHERE hash = ?",
-                    (row["previous_hash"],)
+                expected = compute_entity_hash(
+                    entity_type=row["type"],
+                    created_at=row["created_at"],
+                    updated_at=row["updated_at"],
+                    group_id=row["group_id"],
+                    derived_from=row["derived_from"],
+                    superseded_by=row["superseded_by"],
+                    superseded_at=row["superseded_at"],
+                    previous_hash=row["previous_hash"],
                 )
-                prev_entity = prev_cursor.fetchone()
-
-                if prev_entity is None:
-                    # Previous entity not found - broken chain
-                    broken.append({
+                if expected != row["hash"]:
+                    violations.append({
                         "uuid": row["uuid"],
-                        "previous_hash": row["previous_hash"],
-                        "issue": "previous_hash not found in any entity",
+                        "type": row["type"],
+                        "issue": "stored hash does not match recomputation from row fields",
                     })
 
-        return broken
+        return violations
 
     # ==========================================================================
     # CROSS-DATABASE TRANSACTION CONTEXT
