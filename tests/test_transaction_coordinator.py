@@ -117,8 +117,8 @@ class TestConsistencyCheck:
         orphans = coordinator._find_orphaned_deltas()
         assert orphans == []
 
-    def test_find_broken_hash_chains_empty(self, temp_databases):
-        """Fresh databases have no broken hash chains."""
+    def test_find_hash_integrity_violations_empty(self, temp_databases):
+        """Fresh databases have no hash integrity violations."""
         soil_path, core_path = temp_databases
 
         coordinator = TransactionCoordinator(
@@ -126,8 +126,158 @@ class TestConsistencyCheck:
             core_db_path=core_path
         )
 
-        broken = coordinator._find_broken_hash_chains()
-        assert broken == []
+        violations = coordinator._find_hash_integrity_violations()
+        assert violations == []
+
+    def test_in_place_update_stays_verified(self, temp_databases):
+        """In-place entity edits must not trip the integrity check (#6).
+
+        The #6 false positive: update_data/update_hash overwrite the
+        row's hash, leaving previous_hash pointing at a value that no
+        longer exists in the table — the old resolution check flagged
+        every edited entity. Under per-row recomputation the row stays
+        verified, because previous_hash is the link chained into the
+        current hash, not a cross-row reference.
+        """
+        soil_path, core_path = temp_databases
+
+        coordinator = TransactionCoordinator(
+            soil_db_path=soil_path,
+            core_db_path=core_path
+        )
+
+        import os
+        old_env = os.environ.get('MEMOGARDEN_CORE_DB')
+        try:
+            os.environ['MEMOGARDEN_CORE_DB'] = str(core_path)
+            with get_core() as core:
+                entity_uuid = core.entity.create("Event", data={"title": "v1"})
+                core.entity.update_data(entity_uuid, {"title": "v2"})
+                core.entity.update_data(entity_uuid, {"title": "v3"})
+                row = core._conn.execute(
+                    "SELECT version FROM entity WHERE uuid = ?", (entity_uuid,)
+                ).fetchone()
+        finally:
+            if old_env is not None:
+                os.environ['MEMOGARDEN_CORE_DB'] = old_env
+            elif 'MEMOGARDEN_CORE_DB' in os.environ:
+                del os.environ['MEMOGARDEN_CORE_DB']
+
+        assert row["version"] == 3
+        assert coordinator._find_hash_integrity_violations() == []
+        assert coordinator.check_consistency() == SystemStatus.NORMAL
+
+    def test_supersede_records_previous_hash_and_stays_verified(self, temp_databases):
+        """supersede records the pre-supersede hash in previous_hash."""
+        soil_path, core_path = temp_databases
+
+        coordinator = TransactionCoordinator(
+            soil_db_path=soil_path,
+            core_db_path=core_path
+        )
+
+        import os
+        old_env = os.environ.get('MEMOGARDEN_CORE_DB')
+        try:
+            os.environ['MEMOGARDEN_CORE_DB'] = str(core_path)
+            with get_core() as core:
+                old_uuid = core.entity.create("Scope", data={"label": "Old"})
+                new_uuid = core.entity.create("Scope", data={"label": "New"})
+                pre_hash = core._conn.execute(
+                    "SELECT hash FROM entity WHERE uuid = ?", (old_uuid,)
+                ).fetchone()["hash"]
+                core.entity.supersede(old_uuid, new_uuid)
+                old_row = core._conn.execute(
+                    "SELECT previous_hash, superseded_by FROM entity WHERE uuid = ?",
+                    (old_uuid,),
+                ).fetchone()
+        finally:
+            if old_env is not None:
+                os.environ['MEMOGARDEN_CORE_DB'] = old_env
+            elif 'MEMOGARDEN_CORE_DB' in os.environ:
+                del os.environ['MEMOGARDEN_CORE_DB']
+
+        assert old_row["superseded_by"] == new_uuid
+        assert old_row["previous_hash"] == pre_hash
+        assert coordinator._find_hash_integrity_violations() == []
+        assert coordinator.check_consistency() == SystemStatus.NORMAL
+
+    def test_tampered_row_detected(self, temp_databases):
+        """A tampered lifecycle field breaks the seal and is detected."""
+        soil_path, core_path = temp_databases
+
+        coordinator = TransactionCoordinator(
+            soil_db_path=soil_path,
+            core_db_path=core_path
+        )
+
+        import os
+        old_env = os.environ.get('MEMOGARDEN_CORE_DB')
+        try:
+            os.environ['MEMOGARDEN_CORE_DB'] = str(core_path)
+            with get_core() as core:
+                entity_uuid = core.entity.create("Event", data={"title": "x"})
+                # Simulate tampering: rewrite updated_at behind the writer's back
+                core._conn.execute(
+                    "UPDATE entity SET updated_at = '1999-01-01T00:00:00Z' WHERE uuid = ?",
+                    (entity_uuid,),
+                )
+                core._conn.commit()
+        finally:
+            if old_env is not None:
+                os.environ['MEMOGARDEN_CORE_DB'] = old_env
+            elif 'MEMOGARDEN_CORE_DB' in os.environ:
+                del os.environ['MEMOGARDEN_CORE_DB']
+
+        violations = coordinator._find_hash_integrity_violations()
+        assert len(violations) == 1
+        assert violations[0]["uuid"] == entity_uuid
+        assert coordinator.check_consistency() == SystemStatus.SAFE_MODE
+
+    def test_re_sign_migration_normalizes_legacy_hashes(self, temp_databases):
+        """The 20261121 migration re-signs legacy-format hashes.
+
+        Entity rows written before the 2026-11 hash format carry hashes
+        that cannot be verified against their fields; the migration
+        re-signs every row from its stored fields, after which the
+        recomputation check passes.
+        """
+        soil_path, core_path = temp_databases
+
+        # Create a real entity row, then overwrite its hash to simulate a
+        # legacy-format value (pre-2026-11 rows carry unverifiable hashes)
+        import os
+        old_env = os.environ.get('MEMOGARDEN_CORE_DB')
+        try:
+            os.environ['MEMOGARDEN_CORE_DB'] = str(core_path)
+            with get_core() as core:
+                core.entity.create("Event", data={"title": "legacy"})
+        finally:
+            if old_env is not None:
+                os.environ['MEMOGARDEN_CORE_DB'] = old_env
+            elif 'MEMOGARDEN_CORE_DB' in os.environ:
+                del os.environ['MEMOGARDEN_CORE_DB']
+
+        conn = sqlite3.connect(str(core_path))
+        row = conn.execute("SELECT uuid FROM entity LIMIT 1").fetchone()
+        conn.execute("UPDATE entity SET hash = 'legacy_format_hash' WHERE uuid = ?", (row[0],))
+        conn.commit()
+        conn.close()
+
+        coordinator = TransactionCoordinator(
+            soil_db_path=soil_path,
+            core_db_path=core_path
+        )
+        assert len(coordinator._find_hash_integrity_violations()) == 1
+
+        # Apply the migration the way _run_migrations does (sha256 registered)
+        from system.core import _apply_migration
+        db = sqlite3.connect(str(core_path))
+        _apply_migration(db, "20261120", "20261121")
+        db.close()
+
+        assert coordinator._find_hash_integrity_violations() == []
+        assert coordinator.check_consistency() == SystemStatus.NORMAL
 
     def test_entity_exists_in_core(self, temp_databases):
         """_entity_exists_in_core correctly finds entities."""

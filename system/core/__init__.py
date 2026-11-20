@@ -327,7 +327,7 @@ def get_core() -> Core:
 # DATABASE INITIALIZATION
 # ============================================================================
 
-EXPECTED_SCHEMA_VERSION = "20261120"
+EXPECTED_SCHEMA_VERSION = "20261121"
 
 # Ordered schema version history; each consecutive pair maps to
 # migrations/migrate_<from>_to_<to>.sql (applied by _run_migrations).
@@ -345,6 +345,7 @@ SCHEMA_VERSION_CHAIN = [
     "20261114",
     "20261119",
     "20261120",
+    "20261121",
 ]
 
 
@@ -388,6 +389,15 @@ def _apply_migration(db: sqlite3.Connection, from_version: str, to_version: str)
 
     with open(migration_file, "r") as f:
         migration_sql = f.read()
+
+    # SQL-level hash helpers for data migrations (e.g. the RFC-008 v1.3
+    # entity re-sign): mirrors utils.hash_chain.compute_entity_hash's
+    # `x or ''` None handling via COALESCE in the SQL itself.
+    import hashlib
+
+    db.create_function(
+        "sha256", 1, lambda v: hashlib.sha256(v.encode()).hexdigest()
+    )
 
     try:
         db.executescript(migration_sql)

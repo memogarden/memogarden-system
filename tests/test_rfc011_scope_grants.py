@@ -342,7 +342,25 @@ class TestMigration20261109:
                 active_scopes JSON NOT NULL DEFAULT '[]',
                 primary_scope TEXT
             );
-            CREATE TABLE api_keys (
+            -- entity: present since the base schema — every real database at
+            -- any version in the chain has it. RFC-008 v1.3's 20261121
+            -- migration re-signs entity rows, so hand-built fixtures
+            -- must carry what the chain guarantees (see e1dcd6b).
+            CREATE TABLE entity (
+                uuid TEXT PRIMARY KEY,
+                type TEXT NOT NULL,
+                hash TEXT NOT NULL,
+                previous_hash TEXT,
+                version INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                group_id TEXT,
+                superseded_by TEXT,
+                superseded_at TEXT,
+                derived_from TEXT,
+                data JSON NOT NULL DEFAULT '{}'
+            );
+                        CREATE TABLE api_keys (
                 id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
                 name TEXT NOT NULL,
@@ -426,7 +444,7 @@ class TestProviderScopePolicyColumn:
         version = db.execute(
             "SELECT value FROM _schema_metadata WHERE key = 'version'"
         ).fetchone()
-        assert version[0] == EXPECTED_SCHEMA_VERSION == "20261120"
+        assert version[0] == EXPECTED_SCHEMA_VERSION == "20261121"
         cols = {row[1] for row in db.execute("PRAGMA table_info(providers)")}
         assert "scope_policy" in cols
 
@@ -445,7 +463,25 @@ class TestProviderScopePolicyColumn:
             -- 20261109 database has it — the chain walk to EXPECTED ALTERs it
             -- (E3 capabilities). Hand-built fixtures carry what the chain
             -- guarantees, not just the table under test.
-            CREATE TABLE api_keys (
+            -- entity: present since the base schema — every real database at
+            -- any version in the chain has it. RFC-008 v1.3's 20261121
+            -- migration re-signs entity rows, so hand-built fixtures
+            -- must carry what the chain guarantees (see e1dcd6b).
+            CREATE TABLE entity (
+                uuid TEXT PRIMARY KEY,
+                type TEXT NOT NULL,
+                hash TEXT NOT NULL,
+                previous_hash TEXT,
+                version INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                group_id TEXT,
+                superseded_by TEXT,
+                superseded_at TEXT,
+                derived_from TEXT,
+                data JSON NOT NULL DEFAULT '{}'
+            );
+                        CREATE TABLE api_keys (
                 id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
                 name TEXT NOT NULL,
