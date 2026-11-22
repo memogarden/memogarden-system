@@ -388,3 +388,73 @@ class TestFamilyFromLiveUuid:
         v3 = amend_fact(soil, v2.uuid, data=v2.data, metadata={})
         fam = family(soil, v3.uuid)
         assert fam["chain"] == [v1.uuid, v2.uuid, v3.uuid]
+
+
+class TestAmendMetadataRetryBranch:
+    """The bounded resolve-and-retry on a concurrent supersession — pinned
+    so the loop's exception handling is not mutant-survivable (system#14
+    review P2)."""
+
+    def test_retries_over_concurrent_amend_merges_newer_base(self, soil, monkeypatch):
+        import system.soil.coherence as coherence
+
+        v1 = _fact(soil, metadata={"scopes": ["s1"]})
+        real_amend_fact = coherence.amend_fact
+        state = {"raced": False}
+
+        def racing_amend(soil_arg, target, **kwargs):
+            if not state["raced"]:
+                # A concurrent amend wins the race, THEN the strict guard
+                # fires for our in-flight write (details names the winner).
+                state["raced"] = True
+                newer = real_amend_fact(soil_arg, target, data=kwargs["data"],
+                                        metadata={"scopes": ["concurrent"]})
+                raise ValidationError(
+                    "Cannot amend fact that is already superseded",
+                    {"fact_uuid": target, "superseded_by": newer.uuid},
+                )
+            return real_amend_fact(soil_arg, target, **kwargs)
+
+        monkeypatch.setattr(coherence, "amend_fact", racing_amend)
+        final = amend_metadata(soil, v1.uuid, {"note": "patch"})
+        # merged over the CONCURRENT version's metadata, not the stale base
+        assert final.metadata == {"scopes": ["concurrent"], "note": "patch"}
+        live, chain = resolve_live(soil, v1.uuid)
+        assert live == final.uuid
+        assert len(chain) == 3  # v1 -> concurrent -> final
+
+
+class TestFamilyCycle:
+    """family() must fail LOUD on supersedes cycles (corruption)."""
+
+    def test_family_raises_consistency_on_cycle(self, soil):
+        import system.soil.coherence as coherence
+
+        a = _fact(soil)
+        b = _fact(soil)
+        # relation-row cycle with clean columns (double corruption): each
+        # claims to supersede the other. NB a column edge a->b plus relation
+        # b->a would be a NORMAL amend — consistent, not a cycle.
+        _rel(soil, "supersedes", b.uuid, a.uuid)
+        _rel(soil, "supersedes", a.uuid, b.uuid)
+        with pytest.raises(ConsistencyError):
+            family(soil, a.uuid)
+        with pytest.raises(ConsistencyError):
+            coherence.family(soil, b.uuid)
+
+    def test_backward_relation_cycle_alone_flags(self, soil):
+        import system.soil.coherence as coherence
+
+        a = _fact(soil)
+        b = _fact(soil)
+        # relation-only backward cycle: b supersedes a, a supersedes b,
+        # columns left clean (double-corruption shape from the review)
+        _rel(soil, "supersedes", b.uuid, a.uuid)
+        _rel(soil, "supersedes", a.uuid, b.uuid)
+        _live, chain, cycle = coherence._version_chain(soil._get_connection(), a.uuid)
+        assert cycle is True
+
+    def test_empty_kinds_rejected(self, soil):
+        f = _fact(soil)
+        with pytest.raises(ValidationError):
+            family(soil, f.uuid, kinds=())

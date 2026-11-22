@@ -21,7 +21,11 @@ from typing import Mapping
 
 from utils import uid, isodatetime
 
-from system.exceptions import ConsistencyError, ValidationError
+from system.exceptions import (
+    ConsistencyError,
+    ResourceNotFound,
+    ValidationError,
+)
 from .database import Soil
 from .fact import Fact, current_day, generate_soil_uuid
 from .relation import SystemRelation
@@ -118,19 +122,26 @@ def _version_chain(conn, start: str) -> tuple[str, list[str], bool]:
     the live triage uuid, whose attachments pin to the original email
     version).
 
-    Cycle handling mirrors resolve_chain: stop before revisiting, flag it.
+    Cycle handling mirrors resolve_chain in BOTH directions: stop before
+    revisiting, flag it — the flag covers backward (relation-row) cycles
+    too, and backward hops are normalized to prefixed form so legacy
+    bare-target supersedes rows can't poison the chain.
     """
     seen: set[str] = {start}
     back = [start]
     cur = start
+    backward_cycle = False
     while True:
         row = conn.execute(
             "SELECT target FROM system_relation "
             "WHERE kind = 'supersedes' AND source = ? LIMIT 1", (cur,)
         ).fetchone()
-        if row is None or row["target"] in seen:
+        if row is None:
             break
-        cur = row["target"]
+        cur = uid.add_soil_prefix(uid.strip_prefix(row["target"]))
+        if cur in seen:
+            backward_cycle = True
+            break
         seen.add(cur)
         back.append(cur)
     chain = list(reversed(back))  # oldest .. start
@@ -140,7 +151,7 @@ def _version_chain(conn, start: str) -> tuple[str, list[str], bool]:
             "SELECT superseded_by FROM item WHERE uuid = ?", (u,)
         ).fetchone()
         if row is None or row["superseded_by"] is None:
-            return u, chain, False
+            return u, chain, backward_cycle
         nxt = row["superseded_by"]
         if nxt in seen:
             return u, chain, True
@@ -155,8 +166,9 @@ def resolve_live(soil: Soil, uuid: str, *,
 
     Args:
         soil: open Soil context (caller manages `with get_soil()`).
-        uuid: bare or soil_-prefixed uuid; core_-prefixed input passes
-            through normalized-as-is (entities are not soil rows).
+        uuid: bare or soil_-prefixed uuid. core_-prefixed input is NOT
+            supported (it would normalize to a fake soil_ uuid) — entity
+            resolution lives in the core store, out of scope here.
         sup_map: optional preloaded edge map — skips per-hop queries when
             the caller already holds the bulk map (operator triage's cache).
 
@@ -237,6 +249,9 @@ def family(soil: Soil, uuid: str, *,
     Raises:
         ConsistencyError: supersedes cycle in the chain (loud corruption).
     """
+    if not kinds:
+        raise ValidationError("family requires at least one relation kind",
+                              {"kinds": list(kinds)})
     start = uid.add_soil_prefix(uid.strip_prefix(uuid))
     conn = soil._get_connection()
 
@@ -343,7 +358,6 @@ def amend_fact(soil: Soil, target: str, *, data: dict, metadata: dict | None,
     t = uid.add_soil_prefix(uid.strip_prefix(target))
     original = soil.get_fact(t)
     if original is None:
-        from system.exceptions import ResourceNotFound
         raise ResourceNotFound(f"Fact not found: {t}", details={"target": t})
 
     if original.superseded_by is not None:
@@ -416,7 +430,6 @@ def amend_metadata(soil: Soil, uuid: str, patch: dict, *,
         live, _chain = resolve_live(soil, uuid)
         original = soil.get_fact(live)
         if original is None:
-            from system.exceptions import ResourceNotFound
             raise ResourceNotFound(
                 f"Fact not found: {live}", details={"uuid": uuid, "live": live}
             )
