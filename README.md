@@ -9,6 +9,15 @@ MemoGarden System contains the core business logic for the MemoGarden platform.
 - **Host**: Host platform interface (filesystem, environment, time)
 - **Utils**: Shared utilities (uid, isodatetime)
 
+## Soil supersedes semantics
+
+Facts are append-only under amend: relations pin to capture-time versions,
+and every relation-traversing read must collapse supersedes chains to live
+versions. The shared helpers (`resolve_live`, `family`, `amend_fact`,
+`amend_metadata`, `amend_scopes`) and the full semantics live in
+[docs/supersedes.md](docs/supersedes.md) — read it before writing any
+consumer that traverses `system_relation` rows.
+
 ## Installation
 
 ```bash

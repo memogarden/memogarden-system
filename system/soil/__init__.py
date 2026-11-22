@@ -16,6 +16,14 @@ All UUIDs are auto-generated UUIDv4 with "soil_" prefix.
 from .fact import Fact, Evidence, generate_soil_uuid, SOIL_UUID_PREFIX, current_day
 from .relation import SystemRelation
 from .database import Soil, get_soil, create_email_item
+from .coherence import (
+    resolve_chain,
+    resolve_live,
+    family,
+    amend_fact,
+    amend_metadata,
+    amend_scopes,
+)
 
 __all__ = [
     "Fact",
@@ -27,4 +35,10 @@ __all__ = [
     "current_day",
     "get_soil",
     "create_email_item",
+    "resolve_chain",
+    "resolve_live",
+    "family",
+    "amend_fact",
+    "amend_metadata",
+    "amend_scopes",
 ]

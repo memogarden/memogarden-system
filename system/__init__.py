@@ -11,6 +11,14 @@ from system.core import Core, get_core, init_db, init_system
 
 # Soil exports
 from system.soil import Soil, Fact, Evidence, SystemRelation, get_soil, generate_soil_uuid
+from system.soil import (
+    resolve_chain,
+    resolve_live,
+    family,
+    amend_fact,
+    amend_metadata,
+    amend_scopes,
+)
 
 # Type exports
 from system.core.types import Timestamp, Date
@@ -34,6 +42,13 @@ __all__ = [
     "SystemRelation",
     "get_soil",
     "generate_soil_uuid",
+    # Soil live-view coherence helpers (system#11/#14)
+    "resolve_chain",
+    "resolve_live",
+    "family",
+    "amend_fact",
+    "amend_metadata",
+    "amend_scopes",
     # Types
     "Timestamp",
     "Date",
