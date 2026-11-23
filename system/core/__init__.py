@@ -263,6 +263,47 @@ class Core:
                 # Connection may already be closed or invalid
                 pass
 
+    # ==========================================================================
+    # CHANGE FEED (system#12 search-sync slice)
+    # ==========================================================================
+    # change_log (schemas/sql/core.sql §CHANGE FEED) is trigger-maintained on
+    # entity / user_relation; soil.db runs its own independent feed (Soil
+    # class) — consumers checkpoint the two databases separately.
+
+    def max_change_seq(self) -> int:
+        """Current high-water mark of the Core change feed.
+
+        Returns:
+            Largest committed seq in change_log (0 if the feed is empty)
+        """
+        row = self._conn.execute(
+            "SELECT COALESCE(MAX(seq), 0) FROM change_log"
+        ).fetchone()
+        return int(row[0])
+
+    def changes_since(self, seq: int, limit: int = 1000) -> list[dict]:
+        """Sweep committed feed rows after a checkpoint seq.
+
+        Args:
+            seq: High-water checkpoint; rows with seq <= this are never
+                 returned again.
+            limit: Max rows per call; sweep in a loop until fewer than
+                   limit come back, then checkpoint.
+
+        Returns:
+            Feed rows as dicts: seq, tbl ('entity'|'user_relation'), uuid,
+            kind ('insert'|'update'|'delete'), changed_at, ordered by seq.
+        """
+        cursor = self._conn.execute(
+            """SELECT seq, tbl, uuid, kind, changed_at
+               FROM change_log
+               WHERE seq > ?
+               ORDER BY seq
+               LIMIT ?""",
+            (seq, limit)
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
 
 def _create_connection() -> sqlite3.Connection:
     """Create a fresh database connection.

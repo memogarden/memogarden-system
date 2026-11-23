@@ -259,6 +259,53 @@ class Soil:
         )
         return cursor.rowcount > 0
 
+    # ==========================================================================
+    # CHANGE FEED (system#12 search-sync slice)
+    # ==========================================================================
+    # The change_log table (schemas/sql/soil.sql §CHANGE FEED) is maintained
+    # by triggers: every INSERT/UPDATE/DELETE on item / system_relation appends
+    # a row inside the write's own transaction. These read helpers are the
+    # consumer interface for derived indexes (FTS5 lexical sweep, embed-daemon
+    # catch-up): checkpoint max_change_seq(), sweep changes_since().
+
+    def max_change_seq(self) -> int:
+        """Current high-water mark of the Soil change feed.
+
+        Returns:
+            Largest committed seq in change_log (0 if the feed is empty)
+
+        Note:
+            Consumers store this value only AFTER persisting everything
+            derived from the swept rows, so a crash replays, never skips.
+        """
+        row = self._get_connection().execute(
+            "SELECT COALESCE(MAX(seq), 0) FROM change_log"
+        ).fetchone()
+        return int(row[0])
+
+    def changes_since(self, seq: int, limit: int = 1000) -> list[dict]:
+        """Sweep committed feed rows after a checkpoint seq.
+
+        Args:
+            seq: High-water checkpoint (from max_change_seq / consumer state);
+                 rows with seq <= this are never returned again.
+            limit: Max rows to return per call; sweep in a loop until fewer
+                   than limit come back, then checkpoint.
+
+        Returns:
+            Feed rows as dicts: seq, tbl ('item'|'system_relation'), uuid,
+            kind ('insert'|'update'|'delete'), changed_at, ordered by seq.
+        """
+        cursor = self._get_connection().execute(
+            """SELECT seq, tbl, uuid, kind, changed_at
+               FROM change_log
+               WHERE seq > ?
+               ORDER BY seq
+               LIMIT ?""",
+            (seq, limit)
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
     def find_item_by_rfc_message_id(self, message_id: str) -> Fact | None:
         """Find Email fact by RFC Message-ID.
 
