@@ -46,6 +46,22 @@ CREATE TABLE entity (
     derived_from TEXT,
     data TEXT NOT NULL DEFAULT '{}'
 );
+-- user_relation: the chain guarantees this table from 20260129
+-- (migrate_20251230_to_20260129) — the 20261124 change-feed triggers
+-- (system#12) are created ON it.
+CREATE TABLE user_relation (
+    uuid TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    source TEXT NOT NULL,
+    target TEXT NOT NULL,
+    source_type TEXT NOT NULL DEFAULT 'entity',
+    target_type TEXT NOT NULL DEFAULT 'entity',
+    time_horizon TEXT,
+    last_access_at TEXT,
+    created_at TEXT NOT NULL,
+    evidence JSON,
+    metadata JSON
+);
 CREATE TABLE users (
     id TEXT PRIMARY KEY,
     username TEXT UNIQUE NOT NULL,
@@ -226,6 +242,7 @@ def test_agent_entity_type_schema_loads():
     assert set(required) == {"label", "owner"}
 
 
-def test_expected_version_is_20261121():
-    """Guard against accidental version regression in this branch."""
-    assert EXPECTED_SCHEMA_VERSION == "20261121"
+def test_expected_version_is_20261124():
+    """Guard against accidental version regression (20261124 = change feed,
+    system#12 slice, absorbed alongside api#95's item_fts)."""
+    assert EXPECTED_SCHEMA_VERSION == "20261124"

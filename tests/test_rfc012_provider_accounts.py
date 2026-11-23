@@ -121,6 +121,22 @@ class TestMigrationFrom20261113:
                 derived_from TEXT,
                 data JSON NOT NULL DEFAULT '{}'
             );
+            -- user_relation: the chain guarantees this table from 20260129
+            -- (migrate_20251230_to_20260129) — the 20261124 change-feed
+            -- triggers (system#12) are created ON it.
+            CREATE TABLE user_relation (
+                uuid TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                source TEXT NOT NULL,
+                target TEXT NOT NULL,
+                source_type TEXT NOT NULL DEFAULT 'entity',
+                target_type TEXT NOT NULL DEFAULT 'entity',
+                time_horizon TEXT,
+                last_access_at TEXT,
+                created_at TEXT NOT NULL,
+                evidence JSON,
+                metadata JSON
+            );
                         CREATE TABLE api_keys (
                 id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,

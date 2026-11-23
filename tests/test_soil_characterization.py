@@ -478,7 +478,8 @@ class TestDatabaseInitialization:
 
                 version = soil.get_schema_version()
                 assert version is not None
-                assert version == "20260130"
+                # 20261124: change feed (system#12) + item_fts (api#95)
+                assert version == "20261124"
 
     def test_reinit_is_idempotent(self):
         """Calling init_schema() twice should not fail."""
@@ -489,7 +490,7 @@ class TestDatabaseInitialization:
                 soil.init_schema()  # Should not fail
 
                 version = soil.get_schema_version()
-                assert version == "20260130"
+                assert version == "20261124"
 
     def test_database_file_is_created(self):
         """Database file should be created after init_schema()."""

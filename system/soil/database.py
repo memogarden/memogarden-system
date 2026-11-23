@@ -429,6 +429,223 @@ class Soil:
         return cursor.fetchall()
 
     # ==========================================================================
+    # FULL-TEXT SEARCH (FTS5 — api#95 Phase 1)
+    # ==========================================================================
+
+    @staticmethod
+    def _fts_match_query(query: str) -> str | None:
+        """Harden a raw user query into a safe FTS5 MATCH expression.
+
+        Every whitespace-separated token becomes a quoted prefix term
+        ('"seno"*'), implicitly ANDed — syntactically safe regardless of
+        what the user types (quotes, punctuation, CJK, emoji). Returns None
+        when the query has no tokens (an empty MATCH raises a syntax error).
+        """
+        tokens = [t for t in query.split() if t]
+        if not tokens:
+            return None
+        parts = []
+        for token in tokens:
+            escaped = token.replace('"', '""')
+            parts.append(f'"{escaped}"*')
+        return " ".join(parts)
+
+    def search_items_fts(
+        self,
+        query: str,
+        limit: int = 20,
+        offset: int = 0,
+        allowed_scopes: list[str] | None = None,
+        scope_uuid: str | None = None,
+        scope_filter: list[str] | None = None,
+        live_only: bool = False,
+        types: list[str] | None = None,
+    ) -> list[sqlite3.Row]:
+        """Full-text search over item data (BM25 rank, FTS5 index).
+
+        api#95 Phase 1: the ranked lexical plane. The index is maintained by
+        the item_fts_ai trigger (items are append-only), so it is always
+        complete for rows inserted after the DDL landed; rows that predate
+        it appear as backfill_item_fts() progresses.
+
+        Args:
+            query: Raw search text — hardened internally (safe MATCH
+                syntax, quoted prefix terms, implicit AND).
+            limit: Maximum results.
+            offset: Rank-order offset for pagination.
+            allowed_scopes: RFC-011 §4.9(3) pre-match enforcement — same
+                contract as search_items (None = unrestricted; [] = only
+                unlabeled items; scoped items outside the set never become
+                matches).
+            scope_uuid: Convenience `scope` refinement (RFC-005 v8).
+            scope_filter: Narrow-to-scopes filter (item must carry at
+                least one of these labels; unlike allowed_scopes this is a
+                filter, not an enforcement boundary — unlabeled items do
+                NOT pass).
+            live_only: Exclude superseded items (the console's live view).
+                Default False keeps parity with search_items, which also
+                matches superseded rows.
+            types: Restrict to these fact _type values (console type
+                chips); None = all types.
+
+        Returns:
+            Matching item rows ordered by bm25 rank (best first) — same
+            columns as search_items plus `rank` (negative; more negative
+            is better).
+        """
+        match = self._fts_match_query(query)
+        if match is None:
+            return []
+
+        conditions = ["item_fts MATCH ?"]
+        params: list = [match]
+        if live_only:
+            conditions.append("i.superseded_by IS NULL")
+        # RFC-011 §4.9(3): same pre-match shape as search_items — applied
+        # at WHERE level, before ORDER/LIMIT, on every caller.
+        if allowed_scopes is not None:
+            if allowed_scopes:
+                placeholders = ", ".join("?" for _ in allowed_scopes)
+                conditions.append(
+                    "(NOT EXISTS (SELECT 1 FROM json_each(i.metadata, '$.scopes')) "
+                    f"OR EXISTS (SELECT 1 FROM json_each(i.metadata, '$.scopes') "
+                    f"WHERE value IN ({placeholders})))"
+                )
+                params.extend(allowed_scopes)
+            else:
+                conditions.append(
+                    "NOT EXISTS (SELECT 1 FROM json_each(i.metadata, '$.scopes'))"
+                )
+        if scope_uuid is not None:
+            conditions.append(
+                "EXISTS (SELECT 1 FROM json_each(i.metadata, '$.scopes') "
+                "WHERE value IN (?, ?))"
+            )
+            params.extend([scope_uuid, f"core_{scope_uuid}"])
+        if scope_filter:
+            placeholders = ", ".join("?" for _ in scope_filter)
+            conditions.append(
+                f"EXISTS (SELECT 1 FROM json_each(i.metadata, '$.scopes') "
+                f"WHERE value IN ({placeholders}))"
+            )
+            params.extend(scope_filter)
+        if types:
+            placeholders = ", ".join("?" for _ in types)
+            conditions.append(f"i._type IN ({placeholders})")
+            params.extend(types)
+
+        sql = f"""
+            SELECT i.uuid, i._type, i.data, i.integrity_hash,
+                   i.realized_at, i.canonical_at, i.metadata, i.fidelity,
+                   bm25(item_fts) AS rank
+            FROM item_fts
+            JOIN item i ON i.rowid = item_fts.rowid
+            WHERE {' AND '.join(conditions)}
+            ORDER BY rank, i.rowid
+            LIMIT ? OFFSET ?
+        """
+        params.extend([limit, offset])
+        conn = self._get_connection()
+        return conn.execute(sql, params).fetchall()
+
+    def rebuild_item_fts(self) -> None:
+        """Atomically rebuild the FTS index from item content.
+
+        Uses FTS5's 'rebuild' command: wipes the index and re-inserts every
+        item row in a single transaction. Correct but lock-heavy — it holds
+        the soil write lock for the whole rebuild (minutes at prod corpus
+        size). For live systems prefer backfill_item_fts(). After a rebuild
+        the backfill watermark is set to the done state so a later
+        backfill_item_fts() call cannot re-insert already-indexed rows.
+        """
+        conn = self._get_connection()
+        conn.execute("INSERT INTO item_fts(item_fts) VALUES('rebuild')")
+        # Everything is indexed now — mark the backfill done (watermark =
+        # the legacy boundary, falling back to the current max rowid if the
+        # boundary stamp is somehow absent) so a later backfill_item_fts()
+        # cannot re-insert already-indexed rows.
+        conn.execute(
+            """INSERT INTO _schema_metadata(key, value, updated_at)
+               VALUES ('item_fts_backfill_rowid',
+                       COALESCE(
+                           (SELECT value FROM _schema_metadata
+                            WHERE key = 'item_fts_created_maxrowid'),
+                           (SELECT CAST(COALESCE(MAX(rowid), 0) AS TEXT)
+                            FROM item)),
+                       datetime('now'))
+               ON CONFLICT(key) DO UPDATE SET
+                   value = excluded.value, updated_at = excluded.updated_at"""
+        )
+        conn.commit()
+
+    def backfill_item_fts(self, batch_size: int = 2000) -> int:
+        """Index item rows the FTS trigger never saw (legacy databases).
+
+        The item_fts_ai trigger indexes everything inserted after the DDL
+        landed; rows that predate it are backfilled here in small atomic
+        transactions keyed by a rowid high-water mark
+        (_schema_metadata 'item_fts_backfill_rowid'). The legacy boundary
+        is 'item_fts_created_maxrowid' (recorded at trigger creation), so
+        batches can never overlap trigger-indexed rows. Idempotent: safe to
+        re-run and to interleave with live inserts. Each batch commits its
+        FTS inserts and watermark update together — a crash mid-backfill
+        leaves the previous watermark intact.
+
+        Args:
+            batch_size: Rows per transaction.
+
+        Returns:
+            Number of item rows newly indexed.
+        """
+        conn = self._get_connection()
+
+        def _meta_int(key: str) -> int:
+            row = conn.execute(
+                "SELECT value FROM _schema_metadata WHERE key = ?", (key,)
+            ).fetchone()
+            return int(row["value"]) if row else 0
+
+        boundary = _meta_int("item_fts_created_maxrowid")
+        watermark = _meta_int("item_fts_backfill_rowid")
+
+        total = 0
+        while watermark < boundary:
+            # One BEGIN IMMEDIATE per batch: the watermark read and the FTS
+            # inserts commit atomically AND hold the writer lock for the
+            # whole batch, so two concurrent backfills can never read the
+            # same watermark and double-index a range.
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                batch = conn.execute(
+                    """SELECT rowid, data FROM item
+                       WHERE rowid > ? AND rowid <= ?
+                       ORDER BY rowid LIMIT ?""",
+                    (watermark, min(watermark + batch_size, boundary),
+                     batch_size),
+                ).fetchall()
+                if not batch:
+                    conn.rollback()
+                    break
+                conn.executemany(
+                    "INSERT INTO item_fts(rowid, data) VALUES (?, ?)",
+                    [(r["rowid"], r["data"]) for r in batch],
+                )
+                watermark = batch[-1]["rowid"]
+                conn.execute(
+                    """INSERT INTO _schema_metadata(key, value, updated_at)
+                       VALUES ('item_fts_backfill_rowid', ?, datetime('now'))
+                       ON CONFLICT(key) DO UPDATE SET
+                           value = excluded.value, updated_at = excluded.updated_at""",
+                    (str(watermark),),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            total += len(batch)
+        return total
+
+    # ==========================================================================
     # SYSTEM RELATION OPERATIONS
     # ==========================================================================
 

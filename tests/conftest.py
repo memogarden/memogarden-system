@@ -71,8 +71,20 @@ def clean_database_before_tests(pinned_db_env):
 
     # Clean all items from previous test runs
     with get_soil() as soil:
-        soil._get_connection().execute("DELETE FROM item")
-        soil._get_connection().commit()
+        conn = soil._get_connection()
+        conn.execute("DELETE FROM item")
+        conn.commit()
+        # The FTS index has no AD trigger by design (items are append-only
+        # in production) — a bulk DELETE leaves ghost entries whose rowids
+        # the next inserts then reuse, so a deleted item's terms would
+        # match the new item at the same rowid. Rebuild the derived index
+        # to match the now-empty table (api#95 review P1-2).
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='item_fts'"
+        ).fetchone():
+            conn.execute("INSERT INTO item_fts(item_fts) VALUES('rebuild')")
+            conn.commit()
 
     core = get_core()
 
