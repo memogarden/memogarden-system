@@ -74,11 +74,10 @@ def clean_database_before_tests(pinned_db_env):
         conn = soil._get_connection()
         conn.execute("DELETE FROM item")
         conn.commit()
-        # The FTS index has no AD trigger by design (items are append-only
-        # in production) — a bulk DELETE leaves ghost entries whose rowids
-        # the next inserts then reuse, so a deleted item's terms would
-        # match the new item at the same rowid. Rebuild the derived index
-        # to match the now-empty table (api#95 review P1-2).
+        # Since the item_fts AD trigger (2026-11-25) the bulk DELETE also
+        # un-indexes each row via FTS5 'delete' commands; the rebuild below
+        # stays as belt-and-suspenders (and covers legacy tmp DBs whose
+        # rows predate the triggers).
         if conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' "
             "AND name='item_fts'"

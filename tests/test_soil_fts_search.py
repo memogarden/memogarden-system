@@ -240,3 +240,66 @@ class TestFtsLegacyBackfill:
                 "INSERT INTO item_fts(item_fts, rank) VALUES('integrity-check', 1)")
             assert soil.backfill_item_fts() == 0
             assert len(soil.search_items_fts("senoko")) == 2
+
+
+# ============================================================================
+# Lifecycle sync (20261125): supersede-flip + DELETE leave the index
+# ============================================================================
+
+
+class TestFtsLifecycleSync:
+
+    def test_supersede_flip_keeps_index_consistent(self):
+        """mark_superseded does NOT touch the index (there is deliberately
+        no AU trigger — an AU 'delete' would double-fire with the row's
+        eventual DELETE and corrupt). Superseded rows keep matching by
+        default (parity with fuzzy); live_only filters them."""
+        victim = _fact("xylophone supersede victim", body="rare zabbit token")
+        keeper = _fact("alpha ledger")
+
+        assert _titles(_fts("zabbit")) == {"xylophone supersede victim"}
+
+        with get_soil(str(get_db_path("soil"))) as soil:
+            assert soil.mark_superseded(
+                victim, keeper, "2026-11-25T00:00:00") is True
+
+        # default parity unchanged: superseded rows still match...
+        assert _titles(_fts("zabbit")) == {"xylophone supersede victim"}
+        # ...and live_only excludes them (Phase 1 contract intact)
+        assert _fts("zabbit", live_only=True) == []
+        assert _titles(_fts("alpha")) == {"alpha ledger"}
+
+    def test_non_supersede_update_leaves_tokens_alone(self):
+        """Updates that don't flip superseded_by (e.g. lifecycle column
+        writes with the flip guard) must not desync the index."""
+        uuid = _fact("brontometer ledger", body="rare squale token")
+
+        with get_soil(str(get_db_path("soil"))) as soil:
+            conn = soil._get_connection()
+            # a lifecycle-column write that does NOT set superseded_by
+            conn.execute("UPDATE item SET superseded_at = ? WHERE uuid = ?",
+                         ("2026-11-25T01:00:00", uuid))
+            conn.commit()
+
+        assert _titles(_fts("squale")) == {"brontometer ledger"}
+
+    def test_hard_delete_leaves_index_consistent(self):
+        """item_fts_ad removes deleted rows' tokens — no ghosts, and the
+        index stays query-consistent after the delete (the rowid-reuse
+        corruption vector)."""
+        import sqlite3 as _sq
+        victim = _fact("quartzling ledger", body="rare velnok token")
+
+        assert _titles(_fts("velnok")) == {"quartzling ledger"}
+
+        with get_soil(str(get_db_path("soil"))) as soil:
+            conn = soil._get_connection()
+            conn.execute("DELETE FROM item WHERE uuid = ?", (uuid := victim,))
+            conn.commit()
+
+        assert _fts("velnok") == []
+        # subsequent writes + matches stay consistent (no external-content
+        # desync from the delete)
+        survivor = _fact("post delete ledger", body="marrowfresh token")
+        assert _titles(_fts("marrowfresh")) == {"post delete ledger"}
+        assert _fts("velnok") == []
