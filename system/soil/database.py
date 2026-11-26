@@ -10,6 +10,99 @@ from pathlib import Path
 from .fact import SOIL_UUID_PREFIX, Evidence, Fact, current_day, generate_soil_uuid
 from .relation import SystemRelation
 
+_CHAIN_DEPTH_GUARD = 50
+
+
+def _visibility_clause(
+    alias: str, allowed_scopes: list[str] | None
+) -> tuple[str, list]:
+    """SQL fragment for the §4.9(3) pre-match with successor inheritance
+    (visibility addendum §6 item 1, option (a): a superseded row is read-
+    gated by its LIVE successor's labels — the relabel's decision lives
+    there, never on the stale row).
+
+    A live row passes when unlabeled (SG-1) or any own label is allowed.
+    A superseded row passes when its successor chain's live end exists
+    and is unlabeled or carries an allowed label — own labels are never
+    consulted. A chain that cycles or dead-ends drops the row (no live
+    version to name = nothing readable to gate by).
+
+    Args:
+        alias: column qualifier, '' (search_items) or 'i.' (search_items_fts).
+        allowed_scopes: plain scope uuids; None = unrestricted ("1=1");
+            [] = only rows whose effective labels are empty.
+
+    Returns:
+        (clause, params) for ANDing into the WHERE list.
+    """
+    if allowed_scopes is None:
+        return "1=1", []
+    def _labels_ok(col: str) -> str:
+        if not allowed_scopes:
+            return f"NOT EXISTS (SELECT 1 FROM json_each({col}, '$.scopes'))"
+        placeholders = ", ".join("?" for _ in allowed_scopes)
+        return (
+            f"(NOT EXISTS (SELECT 1 FROM json_each({col}, '$.scopes')) "
+            f"OR EXISTS (SELECT 1 FROM json_each({col}, '$.scopes') "
+            f"WHERE value IN ({placeholders})))"
+        )
+    live_ok = _labels_ok(f"{alias}metadata")
+    live_params = list(allowed_scopes)
+    successor_branch = (
+        f"({alias}superseded_by IS NOT NULL AND EXISTS ("
+        "  WITH RECURSIVE chain(uuid, sup, depth) AS ("
+        f"    SELECT {alias}uuid, {alias}superseded_by, 0"
+        "    UNION ALL"
+        "    SELECT n.uuid, n.superseded_by, c.depth + 1"
+        "    FROM item n JOIN chain c ON n.uuid = c.sup"
+        "    WHERE c.depth < " + str(_CHAIN_DEPTH_GUARD) +
+        "  )"
+        "  SELECT 1 FROM item live"
+        "  WHERE live.uuid = (SELECT uuid FROM chain WHERE sup IS NULL)"
+        f"    AND {_labels_ok('live.metadata')}"
+        "))"
+    )
+    clause = (
+        f"(({alias}superseded_by IS NULL AND {live_ok}) "
+        f"OR {successor_branch})"
+    )
+    return clause, live_params + list(allowed_scopes)
+
+
+def _scope_refinement_clause(
+    alias: str, scope_uuid: str | None
+) -> tuple[str, list]:
+    """SQL fragment for the `scope` refinement with the same inheritance:
+    a superseded row matches when its live successor carries the scope."""
+    if scope_uuid is None:
+        return "1=1", []
+    live = (
+        f"({alias}superseded_by IS NULL AND EXISTS ("
+        f"  SELECT 1 FROM json_each({alias}metadata, '$.scopes') "
+        "   WHERE value IN (?, ?))"
+        ")"
+    )
+    successor = (
+        f"({alias}superseded_by IS NOT NULL AND EXISTS ("
+        "  WITH RECURSIVE chain(uuid, sup, depth) AS ("
+        f"    SELECT {alias}uuid, {alias}superseded_by, 0"
+        "    UNION ALL"
+        "    SELECT n.uuid, n.superseded_by, c.depth + 1"
+        "    FROM item n JOIN chain c ON n.uuid = c.sup"
+        "    WHERE c.depth < " + str(_CHAIN_DEPTH_GUARD) +
+        "  )"
+        "  SELECT 1 FROM json_each("
+        "    (SELECT metadata FROM item"
+        "     WHERE uuid = (SELECT uuid FROM chain WHERE sup IS NULL)), "
+        "    '$.scopes') "
+        "  WHERE value IN (?, ?)"
+        "))"
+    )
+    return (
+        f"({live} OR {successor})",
+        [scope_uuid, f"core_{scope_uuid}"] * 2,
+    )
+
 
 class Soil:
     """Soil database for immutable Facts and System Relations.
@@ -432,32 +525,19 @@ class Soil:
         # the allowed set never become matches (a hit itself is a leak, and
         # a scoped hit displacing a real one corrupts pagination). Applied
         # here at WHERE level, before ORDER/LIMIT, on every coverage level.
-        # allowed_scopes None = unrestricted (flag-off / sovereign callers);
-        # items are visible iff unlabeled (SG-1) or ANY label is allowed
-        # (active frame or public visibility — most permissive wins).
+        # Superseded rows are gated by their live successor's labels
+        # (visibility addendum §6 item 1, option (a) — api#97).
         if allowed_scopes is not None:
-            if allowed_scopes:
-                placeholders = ", ".join("?" for _ in allowed_scopes)
-                where_conditions.append(
-                    "(NOT EXISTS (SELECT 1 FROM json_each(metadata, '$.scopes')) "
-                    f"OR EXISTS (SELECT 1 FROM json_each(metadata, '$.scopes') "
-                    f"WHERE value IN ({placeholders})))"
-                )
-                params.extend(allowed_scopes)
-            else:
-                # Empty allowed set (no frame, no public scopes): only
-                # unlabeled items are visible (SG-1).
-                where_conditions.append(
-                    "NOT EXISTS (SELECT 1 FROM json_each(metadata, '$.scopes'))"
-                )
+            clause, clause_params = _visibility_clause("", allowed_scopes)
+            where_conditions.append(clause)
+            params.extend(clause_params)
         # Convenience `scope` refinement (RFC-005 v8) — narrows results to
-        # one scope; enforcement is automatic and independent of it.
+        # one scope; enforcement is automatic and independent of it. Same
+        # inheritance for superseded rows.
         if scope_uuid is not None:
-            where_conditions.append(
-                "EXISTS (SELECT 1 FROM json_each(metadata, '$.scopes') "
-                "WHERE value IN (?, ?))"
-            )
-            params.extend([scope_uuid, f"core_{scope_uuid}"])
+            clause, clause_params = _scope_refinement_clause("", scope_uuid)
+            where_conditions.append(clause)
+            params.extend(clause_params)
 
         # Build query
         sql = f"""
@@ -549,26 +629,16 @@ class Soil:
         if live_only:
             conditions.append("i.superseded_by IS NULL")
         # RFC-011 §4.9(3): same pre-match shape as search_items — applied
-        # at WHERE level, before ORDER/LIMIT, on every caller.
+        # at WHERE level, before ORDER/LIMIT, on every caller. Superseded
+        # rows are gated by their live successor's labels (api#97).
         if allowed_scopes is not None:
-            if allowed_scopes:
-                placeholders = ", ".join("?" for _ in allowed_scopes)
-                conditions.append(
-                    "(NOT EXISTS (SELECT 1 FROM json_each(i.metadata, '$.scopes')) "
-                    f"OR EXISTS (SELECT 1 FROM json_each(i.metadata, '$.scopes') "
-                    f"WHERE value IN ({placeholders})))"
-                )
-                params.extend(allowed_scopes)
-            else:
-                conditions.append(
-                    "NOT EXISTS (SELECT 1 FROM json_each(i.metadata, '$.scopes'))"
-                )
+            clause, clause_params = _visibility_clause("i.", allowed_scopes)
+            conditions.append(clause)
+            params.extend(clause_params)
         if scope_uuid is not None:
-            conditions.append(
-                "EXISTS (SELECT 1 FROM json_each(i.metadata, '$.scopes') "
-                "WHERE value IN (?, ?))"
-            )
-            params.extend([scope_uuid, f"core_{scope_uuid}"])
+            clause, clause_params = _scope_refinement_clause("i.", scope_uuid)
+            conditions.append(clause)
+            params.extend(clause_params)
         if scope_filter:
             placeholders = ", ".join("?" for _ in scope_filter)
             conditions.append(
