@@ -42,11 +42,14 @@ CONNECTION LIFECYCLE (Session 6.5 Refactor):
 - __exit__ commits on success, rollbacks on exception, always closes connection
 """
 
+import logging
 import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from utils.config import default_settings as settings
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .entity import EntityOperations
@@ -304,6 +307,42 @@ class Core:
         )
         return [dict(row) for row in cursor.fetchall()]
 
+    # ==========================================================================
+    # ENTITY FTS (internal derived index — fts.py; runtime-ensured)
+    # ==========================================================================
+
+    def search_entity_fts(
+        self,
+        query: str,
+        limit: int = 20,
+        offset: int = 0,
+        live_only: bool = True,
+        allowed_scopes: list[str] | None = None,
+        scope_filter: list[str] | None = None,
+        types: list[str] | None = None,
+    ) -> list[sqlite3.Row]:
+        """Full-text search over entity content (BM25 rank, entity_fts).
+
+        Thin delegate to core.fts.search_entity_fts — see there for the
+        contract. The index is runtime-ensured on every connection open
+        (internal derived metadata, never migrated) and completed by the
+        boundary backfill; on a database whose entity table does not
+        exist yet the index is skipped entirely and the search returns
+        no rows rather than raising.
+        """
+        from system.core.fts import search_entity_fts
+
+        return search_entity_fts(
+            self._conn,
+            query,
+            limit=limit,
+            offset=offset,
+            live_only=live_only,
+            allowed_scopes=allowed_scopes,
+            scope_filter=scope_filter,
+            types=types,
+        )
+
 
 def _create_connection() -> sqlite3.Connection:
     """Create a fresh database connection.
@@ -338,6 +377,16 @@ def _create_connection() -> sqlite3.Connection:
     # in parallel threads per account (RFC-012 §4.5), so concurrent
     # read/write on provider_runs is routine, not exceptional.
     conn.execute("PRAGMA busy_timeout = 5000")
+    # entity_fts (internal derived index) is ensured on every open: the DDL
+    # statements are no-ops once present, and every writer — the API, the
+    # docling ingest timer, manual scripts — gets the sync triggers from the
+    # first connection that creates them. Skips fresh/uninitialized files.
+    try:
+        from system.core.fts import ensure_entity_fts
+
+        ensure_entity_fts(conn)
+    except sqlite3.OperationalError as e:
+        logger.warning("entity_fts ensure skipped: %s", e)
     return conn
 
 
