@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import contextmanager
 from datetime import UTC
 from pathlib import Path
 
@@ -187,6 +188,34 @@ class Soil:
         """
         if self._conn is not None:
             self._conn.commit()
+
+    @contextmanager
+    def write_txn(self):
+        """BEGIN IMMEDIATE write transaction (system#15).
+
+        Python sqlite3 auto-begins transactions DEFERRED — a transaction
+        whose first statement is a read upgrades to writer only later, and
+        a snapshot upgrade after another writer committed returns BUSY
+        immediately: the busy handler deliberately never runs for that
+        case, so busy_timeout never applies. Multi-statement write
+        sequences that read before writing must instead acquire the write
+        lock UP FRONT — the acquisition wait is the polite,
+        busy-timeout-honoring kind, and once held, reads and writes are
+        consistent for the transaction's duration.
+
+        Commits on clean exit, rolls back on exception. Safe inside the
+        plain Soil context: the outer __exit__ commit of an
+        already-committed transaction is a no-op.
+        """
+        conn = self._get_connection()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield conn
+        except BaseException:
+            conn.rollback()
+            raise
+        else:
+            conn.commit()
 
     def __enter__(self) -> Soil:
         """Enter context manager for transaction.
