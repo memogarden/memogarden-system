@@ -460,7 +460,7 @@ class TestProviderScopePolicyColumn:
         version = db.execute(
             "SELECT value FROM _schema_metadata WHERE key = 'version'"
         ).fetchone()
-        assert version[0] == EXPECTED_SCHEMA_VERSION == "20261128"
+        assert version[0] == EXPECTED_SCHEMA_VERSION == "20261129"
         cols = {row[1] for row in db.execute("PRAGMA table_info(providers)")}
         assert "scope_policy" in cols
 

@@ -31,7 +31,7 @@ def test_fresh_core_seed_carries_the_columns():
         finally:
             os.environ.pop("MEMOGARDEN_DATA_DIR", None)
     assert {"triggered_by_key", "external_app_id"} <= cols
-    assert version == EXPECTED_SCHEMA_VERSION == "20261128"
+    assert version == EXPECTED_SCHEMA_VERSION
 
 
 def test_migration_converges_existing_db():
@@ -45,8 +45,12 @@ def test_migration_converges_existing_db():
             init_db()
             conn = sqlite3.connect(os.path.join(tmpdir, "core.db"))
             conn.execute("UPDATE _schema_metadata SET value='20261124'")
+            # strip everything the chain walk re-adds: the 20261128 tagging
+            # columns and the 20261129 description — a real 20261124 DB
+            # never carried any of them
             conn.execute("ALTER TABLE provider_runs DROP COLUMN triggered_by_key")
             conn.execute("ALTER TABLE provider_runs DROP COLUMN external_app_id")
+            conn.execute("ALTER TABLE api_keys DROP COLUMN description")
             conn.commit()
             conn.close()
 
@@ -59,4 +63,4 @@ def test_migration_converges_existing_db():
         finally:
             os.environ.pop("MEMOGARDEN_DATA_DIR", None)
     assert {"triggered_by_key", "external_app_id"} <= cols
-    assert version == "20261128"
+    assert version == EXPECTED_SCHEMA_VERSION
