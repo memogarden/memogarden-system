@@ -242,7 +242,8 @@ def test_agent_entity_type_schema_loads():
     assert set(required) == {"label", "owner"}
 
 
-def test_expected_version_is_20261124():
-    """Guard against accidental version regression (20261124 = change feed,
-    system#12 slice, absorbed alongside api#95's item_fts)."""
-    assert EXPECTED_SCHEMA_VERSION == "20261124"
+def test_expected_version_is_20261128():
+    """Guard against accidental version regression (20261128 = provider-run
+    tagging columns: triggered_by_key + external_app_id, operator directive
+    2026-11-28)."""
+    assert EXPECTED_SCHEMA_VERSION == "20261128"

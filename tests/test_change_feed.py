@@ -373,6 +373,9 @@ class TestMigrationTo20261124:
         db.row_factory = sqlite3.Row
         # A 20261121 database is exactly the current DDL minus the feed
         # (20261124 is additive): seed fresh, stamp back, drop the feed.
+        # Also drops the 20261128 provider-run tagging columns — a real
+        # 20261121/20261124 database never carried them, and the chain
+        # walk to 20261128 re-adds them.
         db.executescript(get_sql_schema("core"))
         db.execute(
             "UPDATE _schema_metadata SET value = '20261121' WHERE key = 'version'"
@@ -386,6 +389,8 @@ class TestMigrationTo20261124:
             DROP TRIGGER IF EXISTS userrel_change_update;
             DROP TRIGGER IF EXISTS userrel_change_delete;
             DROP TABLE IF EXISTS change_log;
+            ALTER TABLE provider_runs DROP COLUMN triggered_by_key;
+            ALTER TABLE provider_runs DROP COLUMN external_app_id;
             """
         )
         db.commit()

@@ -417,7 +417,7 @@ def get_core() -> Core:
 # DATABASE INITIALIZATION
 # ============================================================================
 
-EXPECTED_SCHEMA_VERSION = "20261124"
+EXPECTED_SCHEMA_VERSION = "20261128"
 
 # Ordered schema version history; each consecutive pair maps to
 # migrations/migrate_<from>_to_<to>.sql (applied by _run_migrations).
@@ -437,6 +437,7 @@ SCHEMA_VERSION_CHAIN = [
     "20261120",
     "20261121",
     "20261124",
+    "20261128",
 ]
 
 
